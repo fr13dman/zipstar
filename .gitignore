@@ -1,0 +1,7 @@
+/zipstar
+/bin/
+*.zip
+.DS_Store
+*.exe
+*.test
+coverage.out
