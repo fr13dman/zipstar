@@ -23,8 +23,20 @@ func NewRoot(reg *formats.Registry) *cobra.Command {
 	opts := &Options{Registry: reg}
 
 	root := &cobra.Command{
-		Use:           "zipstar",
-		Short:         "Archive and unarchive files (extensible formats; zip first)",
+		Use:   "zipstar",
+		Short: "Archive and unarchive files (extensible formats; zip first)",
+		Long: `Archive and unarchive files (extensible formats; zip first).
+
+Command-specific flags (such as -e/--encrypt and -p/--password) appear on the
+subcommand help pages, not on this root help:
+
+  zipstar archive --help
+  zipstar unarchive --help
+  zipstar list --help`,
+		Example: `  zipstar archive --help
+  zipstar a -e -p secret -o out.zip ./folder
+  zipstar u -p secret out.zip -C /tmp/out
+  zipstar l -v out.zip`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
