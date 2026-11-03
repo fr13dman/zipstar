@@ -29,10 +29,12 @@ zipstar archive|a [flags] <paths...>
 | `-o, --output` | derived | Output archive path. If omitted: `<basename-of-first-input>.<ext>` |
 | `--format` | inferred | Format name (e.g. `zip`) |
 | `--level` | `5` | Compression level `0`–`9` |
-| `--encrypt` | off | Encrypt entries (AES-256 for zip) |
-| `--password` | unset | Password (see Password resolution) |
+| `-e, --encrypt` | off | Encrypt entries (AES-256 for zip) |
+| `-p, --password` | unset | Password (see Password resolution) |
 | `--force` | off | Overwrite existing output archive |
 | `-v, --verbose` | off | Print each archived entry name |
+
+Root `zipstar --help` lists global flags only; use `zipstar archive --help` (or `a -h`) for the full archive flag set.
 
 ### Unarchive
 
@@ -44,7 +46,7 @@ zipstar unarchive|u [flags] <archive>
 |------|---------|---------|
 | `-C, --dir` | `.` | Destination directory |
 | `--format` | inferred | Format name |
-| `--password` | unset | Password when archive is encrypted |
+| `-p, --password` | unset | Password when archive is encrypted |
 | `--force` | off | Overwrite existing extracted paths |
 | `-v, --verbose` | off | Print each extracted entry name |
 
@@ -57,7 +59,7 @@ zipstar list|l [flags] <archive>
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--format` | inferred | Format name |
-| `--password` | unset | Optional; not required for zip header listing |
+| `-p, --password` | unset | Optional; not required for zip header listing |
 | `-v, --verbose` | off | Add method and encrypted flag columns |
 
 Default list line: `name<TAB>size<TAB>mode`  
