@@ -9,6 +9,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/fr13dman/zipstar-cli/internal/archive"
 )
 
 // ErrCanceled is returned when the user quits the picker without a selection.
@@ -18,20 +20,27 @@ type dirEntry struct {
 	Name      string
 	IsDir     bool
 	IsArchive bool
+	Parts     int // > 1 for the first volume of a multi-volume set (other volumes are hidden)
 }
 
 // model is the Bubble Tea path picker state.
+//
+// dir is the committed directory (changed by Enter on a folder). viewDir is the
+// directory currently listed: it follows a path typed into the input (e.g.
+// "~/Downloads/" or "../other/x"), resolved relative to dir, so typing a path
+// previews that folder before Enter commits it.
 type model struct {
-	dir        string
-	exts       map[string]struct{}
-	entries    []dirEntry // full listing of current dir
-	filtered   []dirEntry
-	cursor     int
-	filter     textinput.Model
-	selected   string
-	canceled   bool
-	statusErr  string
-	quitting   bool
+	dir       string
+	viewDir   string
+	exts      map[string]struct{}
+	entries   []dirEntry // full listing of viewDir
+	filtered  []dirEntry
+	cursor    int
+	filter    textinput.Model
+	selected  string
+	canceled  bool
+	statusErr string
+	quitting  bool
 }
 
 func newModel(startDir string, extensions []string) model {
@@ -46,9 +55,10 @@ func newModel(startDir string, extensions []string) model {
 	ti.Width = 48
 
 	m := model{
-		dir:    startDir,
-		exts:   exts,
-		filter: ti,
+		dir:     startDir,
+		viewDir: startDir,
+		exts:    exts,
+		filter:  ti,
 	}
 	m.reload()
 	return m
@@ -56,18 +66,23 @@ func newModel(startDir string, extensions []string) model {
 
 func (m *model) reload() {
 	m.statusErr = ""
-	ents, err := os.ReadDir(m.dir)
+	ents, err := os.ReadDir(m.viewDir)
 	if err != nil {
 		m.entries = nil
 		m.filtered = nil
-		m.statusErr = err.Error()
+		if os.IsNotExist(err) {
+			m.statusErr = "no such directory: " + m.viewDir
+		} else {
+			m.statusErr = err.Error()
+		}
 		return
 	}
 	out := make([]dirEntry, 0, len(ents)+1)
-	parent := filepath.Dir(m.dir)
-	if parent != m.dir {
+	parent := filepath.Dir(m.viewDir)
+	if parent != m.viewDir {
 		out = append(out, dirEntry{Name: "..", IsDir: true})
 	}
+	sets := volumeSets(ents)
 	for _, e := range ents {
 		name := e.Name()
 		if strings.HasPrefix(name, ".") {
@@ -75,18 +90,57 @@ func (m *model) reload() {
 		}
 		isDir := e.IsDir()
 		isArch := false
+		parts := 0
 		if !isDir {
 			ext := strings.ToLower(filepath.Ext(name))
 			_, isArch = m.exts[ext]
+			if key, _, ok := archive.VolumeOf(name); ok {
+				if set := sets[key]; set.count > 1 {
+					if name != set.first {
+						continue // later volumes are reached through the first one
+					}
+					isArch = true
+					parts = set.count
+				}
+			}
 		}
-		out = append(out, dirEntry{Name: name, IsDir: isDir, IsArchive: isArch})
+		out = append(out, dirEntry{Name: name, IsDir: isDir, IsArchive: isArch, Parts: parts})
 	}
 	m.entries = out
 	m.applyFilter()
 }
 
+type volumeSet struct {
+	first    string
+	firstNum int
+	count    int
+}
+
+// volumeSets groups multi-volume RAR names in a listing by set, recording each
+// set's first volume (the one extraction must start from) and size.
+func volumeSets(ents []os.DirEntry) map[string]volumeSet {
+	sets := map[string]volumeSet{}
+	for _, e := range ents {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		key, num, ok := archive.VolumeOf(e.Name())
+		if !ok {
+			continue
+		}
+		s := sets[key]
+		if s.count == 0 || num < s.firstNum {
+			s.first, s.firstNum = e.Name(), num
+		}
+		s.count++
+		sets[key] = s
+	}
+	return sets
+}
+
 func (m *model) applyFilter() {
-	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	_, q, _ := m.inputView()
+	q = strings.ToLower(q)
 	if q == "" {
 		m.filtered = append([]dirEntry(nil), m.entries...)
 	} else {
@@ -103,6 +157,86 @@ func (m *model) applyFilter() {
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
+}
+
+// inputView interprets the input as either a plain filter for dir, or a path:
+// the part up to the last separator picks the directory to list and the rest
+// filters inside it.
+func (m *model) inputView() (viewDir, query string, isPath bool) {
+	raw := strings.TrimSpace(m.filter.Value())
+	if raw == "" || !looksLikePath(raw) {
+		return m.dir, raw, false
+	}
+	dirRaw, q := splitPathInput(raw)
+	if dirRaw == "" {
+		return m.dir, q, true
+	}
+	return filepath.Clean(expandPath(dirRaw, m.dir)), q, true
+}
+
+// onInputChanged re-lists when the typed path points at another directory,
+// then filters the listing by the remainder.
+func (m *model) onInputChanged() {
+	m.cursor = 0
+	m.statusErr = ""
+	viewDir, _, _ := m.inputView()
+	if viewDir != m.viewDir || m.entries == nil {
+		m.viewDir = viewDir
+		m.reload()
+		return
+	}
+	m.applyFilter()
+}
+
+// splitPathInput splits "a/b/fil" into ("a/b/", "fil"). A trailing "~", "." or
+// ".." component names a directory, so it stays in the directory part.
+func splitPathInput(raw string) (dirRaw, query string) {
+	dirRaw, query = "", raw
+	if i := strings.LastIndexAny(raw, "/"+string(filepath.Separator)); i >= 0 {
+		dirRaw, query = raw[:i+1], raw[i+1:]
+	}
+	if query == "~" || query == "." || query == ".." {
+		dirRaw, query = raw, ""
+	}
+	return dirRaw, query
+}
+
+// enterDir commits dir as the current directory and clears the input.
+func (m *model) enterDir(dir string) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		m.statusErr = err.Error()
+		return
+	}
+	m.dir = abs
+	m.viewDir = abs
+	m.filter.SetValue("")
+	m.cursor = 0
+	m.reload()
+}
+
+// complete replaces the input with the highlighted entry's path (Tab).
+// Directories get a trailing separator so the listing previews their contents.
+func (m *model) complete() {
+	if len(m.filtered) == 0 {
+		return
+	}
+	cur := m.filtered[m.cursor]
+	prefix := ""
+	if _, _, isPath := m.inputView(); isPath {
+		dirRaw, _ := splitPathInput(strings.TrimSpace(m.filter.Value()))
+		prefix = dirRaw
+		if prefix != "" && !strings.HasSuffix(prefix, "/") && !strings.HasSuffix(prefix, string(filepath.Separator)) {
+			prefix += string(filepath.Separator)
+		}
+	}
+	val := prefix + cur.Name
+	if cur.IsDir {
+		val += string(filepath.Separator)
+	}
+	m.filter.SetValue(val)
+	m.filter.CursorEnd()
+	m.onInputChanged()
 }
 
 func (m model) Init() tea.Cmd {
@@ -129,6 +263,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case tea.KeyEnter:
 			return m.handleEnter()
+		case tea.KeyTab:
+			m.complete()
+			return m, nil
 		}
 	}
 
@@ -136,62 +273,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	prev := m.filter.Value()
 	m.filter, cmd = m.filter.Update(msg)
 	if m.filter.Value() != prev {
-		m.applyFilter()
+		m.onInputChanged()
 	}
 	return m, cmd
 }
 
 func (m model) handleEnter() (tea.Model, tea.Cmd) {
 	raw := strings.TrimSpace(m.filter.Value())
-	// Jump/select when the filter looks like an explicit path.
+	// An exact typed path wins: open a directory, select a file.
 	if raw != "" && looksLikePath(raw) {
 		target := expandPath(raw, m.dir)
-		info, err := os.Stat(target)
-		if err != nil {
-			m.statusErr = err.Error()
-			return m, nil
-		}
-		if info.IsDir() {
+		if info, err := os.Stat(target); err == nil {
+			if info.IsDir() {
+				m.enterDir(target)
+				return m, nil
+			}
 			abs, err := filepath.Abs(target)
 			if err != nil {
 				m.statusErr = err.Error()
 				return m, nil
 			}
-			m.dir = abs
-			m.filter.SetValue("")
-			m.cursor = 0
-			m.reload()
-			return m, nil
+			m.selected = abs
+			m.quitting = true
+			return m, tea.Quit
 		}
-		abs, err := filepath.Abs(target)
-		if err != nil {
-			m.statusErr = err.Error()
-			return m, nil
-		}
-		m.selected = abs
-		m.quitting = true
-		return m, tea.Quit
+		// Partial path (e.g. "~/Downloads/fo"): fall through to the highlighted
+		// match inside the previewed directory.
 	}
 
 	if len(m.filtered) == 0 {
-		m.statusErr = "no matching entries"
+		if m.statusErr == "" {
+			m.statusErr = "no matching entries"
+		}
 		return m, nil
 	}
 	cur := m.filtered[m.cursor]
-	full := filepath.Join(m.dir, cur.Name)
+	full := filepath.Join(m.viewDir, cur.Name)
 	if cur.Name == ".." {
-		full = filepath.Dir(m.dir)
+		full = filepath.Dir(m.viewDir)
 	}
 	if cur.IsDir {
-		abs, err := filepath.Abs(full)
-		if err != nil {
-			m.statusErr = err.Error()
-			return m, nil
-		}
-		m.dir = abs
-		m.filter.SetValue("")
-		m.cursor = 0
-		m.reload()
+		m.enterDir(full)
 		return m, nil
 	}
 	if !cur.IsArchive {
@@ -243,7 +365,7 @@ func (m model) View() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Select archive"))
 	b.WriteString("\n")
-	b.WriteString(m.dir)
+	b.WriteString(m.viewDir)
 	b.WriteString("\n\n")
 	b.WriteString(m.filter.View())
 	b.WriteString("\n\n")
@@ -264,6 +386,9 @@ func (m model) View() string {
 			label = dirStyle.Render(e.Name + "/")
 		} else if e.IsArchive {
 			label = archStyle.Render(e.Name)
+			if e.Parts > 1 {
+				label += helpStyle.Render(fmt.Sprintf(" (%d parts)", e.Parts))
+			}
 		}
 		prefix := "  "
 		if i == m.cursor {
@@ -283,7 +408,7 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑↓ move · enter open/select · esc cancel"))
+	b.WriteString(helpStyle.Render("type to filter or a path (/, ~/, ../) to browse · tab complete · ↑↓ move · enter open/select · esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }

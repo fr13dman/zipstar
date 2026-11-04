@@ -84,7 +84,7 @@ func runUnarchive(ctx context.Context, opts *Options, a unarchiveArgs) error {
 		fmt.Fprintln(status, m)
 	}
 
-	targets := archive.CoalesceArchives(expanded)
+	targets := archive.DiscoverVolumes(archive.CoalesceArchives(expanded))
 	if len(targets) == 0 {
 		return Usagef("no archives to extract after expanding inputs")
 	}

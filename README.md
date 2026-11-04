@@ -58,6 +58,30 @@ Requires Go 1.22+ (developed with Go 1.27).
 go build -o zipstar ./cmd/zipstar
 ```
 
+## Install
+
+The installers build zipstar for the current machine, install it with a matching UnRAR binary (for fast RAR extraction), and add the install folder to your PATH if it isn't already there.
+
+**macOS / Linux** — installs to `/usr/local/bin` (uses `sudo` only if that folder isn't writable):
+
+```bash
+./scripts/install.sh                      # /usr/local/bin
+./scripts/install.sh --prefix ~/.local/bin   # somewhere else
+./scripts/install.sh --uninstall          # remove it again (same --prefix if you used one)
+```
+
+**Windows (PowerShell)** — installs per-user to `%LOCALAPPDATA%\Programs\zipstar` (no admin needed) and adds it to your user PATH:
+
+```powershell
+.\scripts\install.ps1
+.\scripts\install.ps1 -Prefix C:\tools\zipstar
+.\scripts\install.ps1 -Uninstall
+```
+
+Options: `--no-unrar` / `-NoUnrar` skips UnRAR (zipstar falls back to its built-in RAR decoder), `--no-path` / `-NoPath` leaves PATH alone, `--unrar FILE` / `-Unrar FILE` installs a specific UnRAR binary.
+
+UnRAR is installed beside zipstar as `unrar-<os>-<arch>`, so it never replaces a system or Homebrew `unrar`. `/usr/sbin` is not used: macOS System Integrity Protection blocks writes to it even with `sudo`, and on Linux it is reserved for system administration tools. Details: [installer](docs/implementation/installer.md).
+
 ## Usage
 
 ```bash
@@ -121,8 +145,9 @@ Every flag has a one-letter shortcut (also shown in `--help`):
 | `-C` | `--dir` | `unarchive` | Destination directory (default `.`) |
 | `-P` | `--progress` | `unarchive` | Progress bar, on by default; `-P=false` disables |
 | `-h` | `--help` | all | Help for the command |
+| `-V` | `--version` | `zipstar` | Print version, commit, build time, Go version and platform |
 
-Note the case: `-f` is format, `-F` is force; `-p` is password, `-P` is progress. Boolean flags that default to on take an explicit value (`-P=false`).
+Note the case: `-f` is format, `-F` is force; `-p` is password, `-P` is progress; `-v` is verbose, `-V` is version. Boolean flags that default to on take an explicit value (`-P=false`).
 
 Password sources: `-p`/`--password` → `ZIPSTAR_PASSWORD` → interactive masked prompt (`*`) on a TTY.
 
@@ -154,7 +179,7 @@ internal/cli/picker/   # Bubble Tea archive path picker
 internal/archive/      # format resolve (ext + sniff), globs, multi-volume coalescing
 internal/detect/       # content sniff + cache
 internal/formats/      # Format interface + zip / rar backends
-scripts/               # fetch-unrar.sh (per-platform UnRAR release assets)
+scripts/               # install.sh / install.ps1 (build + install), fetch-unrar.sh (UnRAR release assets)
 third_party/unrar/     # UnRAR license + fetched binaries (binaries not committed)
 docs/                  # SPEC / ARCHITECTURE / IMPLEMENTATION_SPEC / FORMATS / implementation
 ```

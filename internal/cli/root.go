@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fr13dman/zipstar-cli/internal/formats"
+	"github.com/fr13dman/zipstar-cli/internal/version"
 )
 
 // Options shared across commands.
@@ -28,8 +29,9 @@ func NewRoot(reg *formats.Registry) *cobra.Command {
 		Long: `Archive and unarchive files (extensible formats; zip first).
 
 Every flag has a one-letter shortcut. Global: -f/--format, -F/--force,
--v/--verbose. Command-specific flags (such as -e/--encrypt, -p/--password,
--l/--level, -P/--progress) appear on the subcommand help pages:
+-v/--verbose; -V/--version prints the version. Command-specific flags (such as
+-e/--encrypt, -p/--password, -l/--level, -P/--progress) appear on the
+subcommand help pages:
 
   zipstar archive --help
   zipstar unarchive --help
@@ -39,9 +41,14 @@ Every flag has a one-letter shortcut. Global: -f/--format, -F/--force,
   zipstar u -p secret -C /tmp/out out.zip
   zipstar u -F -P=false -C /tmp/out 'multi.part*.rar'
   zipstar l -v -f rar archive.rar`,
+		Version:       version.String(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// -v is --verbose, so --version takes -V. Cobra reuses this flag instead
+	// of adding its own and prints the version when it is set.
+	root.Flags().BoolP("version", "V", false, "print the zipstar version and exit")
+	root.SetVersionTemplate("{{.Version}}")
 
 	root.PersistentFlags().StringVarP(&opts.Format, "format", "f", "", "archive format (inferred from extension when omitted)")
 	root.PersistentFlags().BoolVarP(&opts.Verbose, "verbose", "v", false, "print each archived/extracted/listed path detail")

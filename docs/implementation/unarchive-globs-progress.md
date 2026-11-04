@@ -27,13 +27,14 @@ zipstar **coalesces** the set and extracts once from the first volume.
 
 ## Flow
 
-1. `ExpandInputs` — expand each arg with `filepath.Glob` (error if a glob matches nothing).
+1. `ExpandInputs` — an arg that exists on disk is used literally (names like `29090D43[ddpanda].part1.rar` contain `[` and must not be treated as a character class); otherwise expand with `filepath.Glob` (error if a glob matches nothing).
 2. `CoalesceArchives` → `[]ExtractTarget` with `Path` + `VolumeCount` / `Volumes`.
-3. Status: multi-volume note (`N volumes … all members unpack into <dest>`), then `extracting K archive(s) into <dest>`.
-4. Per target: header-only `List` for the bar total (skipped with `--progress=false`) → `Unarchive` with:
+3. `DiscoverVolumes` — a target naming one volume (picker selection, or one explicit `x.part3.rar`) gains its siblings from the directory and moves `Path` to the first volume. Volume naming is parsed in one place, `archive.VolumeOf`, shared with the picker's set grouping.
+4. Status: multi-volume note (`N volumes … all members unpack into <dest>`), then `extracting K archive(s) into <dest>`.
+5. Per target: header-only `List` for the bar total (skipped with `--progress=false`) → `Unarchive` with:
    - `OnFile(name)` — advances the bar and shows the member currently extracting
    - `OnVolume(path)` — prints `reading volume i/N: <part>` above the bar as each part is opened
-5. Summary: `finished <first part> → <dest> (F file(s) from V volumes)`.
+6. Summary: `finished <first part> → <dest> (F file(s) from V volumes)`.
 
 ```bash
 ./zipstar u 'big.part*.rar' -C /tmp/out

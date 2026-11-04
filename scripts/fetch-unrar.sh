@@ -76,10 +76,23 @@ fetch_win() {
   local plat="windows_amd64"
   local url="${BASE}/unrarw64.exe"
   local dir="${OUT}/${plat}"
+  local tmp
+  tmp="$(mktemp -d)"
   mkdir -p "$dir"
   echo "→ ${plat}: ${url}"
-  curl -fsSL -o "${dir}/unrar.exe" "$url"
+  # unrarw64.exe is a self-extracting RAR (GUI) holding UnRAR.exe + license.txt,
+  # not UnRAR itself. Saved under a .rar name, zipstar's pure-Go decoder unpacks
+  # it, so no host UnRAR is needed.
+  curl -fsSL -o "${tmp}/unrar-sfx.rar" "$url"
+  (cd "$ROOT" && ZIPSTAR_UNRAR=off go run ./cmd/zipstar u -P=false -F -C "${tmp}/x" "${tmp}/unrar-sfx.rar" >/dev/null)
+  if [[ ! -f "${tmp}/x/UnRAR.exe" ]]; then
+    echo "error: UnRAR.exe not found in ${url}" >&2
+    rm -rf "$tmp"
+    exit 1
+  fi
+  cp "${tmp}/x/UnRAR.exe" "${dir}/unrar.exe"
   cp "${dir}/unrar.exe" "${DIST}/unrar-windows-amd64.exe"
+  rm -rf "$tmp"
   echo "  installed ${dir}/unrar.exe"
   echo "  asset     ${DIST}/unrar-windows-amd64.exe"
 }

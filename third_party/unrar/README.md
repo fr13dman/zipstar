@@ -42,3 +42,11 @@ At runtime zipstar looks for (in order):
 5. Pure-Go `rardecode` fallback  
 
 Linux arm64 is not currently published by RARLab in the same package set; those hosts use `rardecode` unless the user provides `ZIPSTAR_UNRAR`.
+
+RARLab's Windows download (`unrarw64.exe`) is a self-extracting RAR containing
+`UnRAR.exe` and `license.txt`, not UnRAR itself. `fetch-unrar.sh` and
+`install.ps1` save it under a `.rar` name and unpack it with zipstar's
+built-in decoder, so no host UnRAR is needed.
+
+`scripts/install.sh` / `scripts/install.ps1` install the matching binary beside
+zipstar as `unrar-<os>-<arch>[.exe]` (see `docs/implementation/installer.md`).

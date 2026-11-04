@@ -18,6 +18,23 @@ macOS is the supported v1 target. Code should remain portable; other OSes are be
 | `unarchive` | `u` | Extract an archive |
 | `list` | `l` | List archive members |
 
+### Version
+
+```
+zipstar --version | -V
+```
+
+Prints the version and exits `0`, e.g.:
+
+```
+zipstar v0.2.0
+  commit: 5245830 (modified)
+  built:  2026-11-04T21:04:38Z
+  go:     go1.27.3 darwin/arm64
+```
+
+The version comes from the build: the installers stamp `git describe --tags --always --dirty`; `go install …@vX.Y.Z` reports that module version; otherwise the Go toolchain's VCS pseudo-version (or `dev`). `commit`/`built` lines appear when the build recorded VCS information. `-v` remains `--verbose`.
+
 ### Archive
 
 ```
@@ -51,7 +68,7 @@ zipstar unarchive|u [flags] [<archive|glob>...]
 | `-P, --progress` | on | Progress bar on stderr; `-P=false` disables it |
 | `-v, --verbose` | off | Print each extracted entry name on stdout |
 
-Arguments may be concrete paths or shell-style globs (`*.rar`, `multi.part*.rar`). Status lines (glob matches, multi-volume coalescing, per-archive labels, completion) go to **stderr**. Multi-volume RAR sets matched by a glob are extracted once from the first volume; sibling parts are opened automatically beside it.
+Arguments may be concrete paths or shell-style globs (`*.rar`, `multi.part*.rar`). A path that exists is always taken literally, even if its name contains glob characters (e.g. `pack[v2].rar`). Passing any single volume of a multi-volume set (e.g. `x.part3.rar`) extracts the whole set, starting from the first volume. Status lines (glob matches, multi-volume coalescing, per-archive labels, completion) go to **stderr**. Multi-volume RAR sets matched by a glob are extracted once from the first volume; sibling parts are opened automatically beside it.
 
 At least one argument is required when stdin is not a TTY. When no arguments are given and stdin is a TTY, zipstar opens an interactive path picker (see Interactive path picker) to choose a single archive. Canceling the picker (Esc) exits with code `1`.
 
@@ -84,8 +101,10 @@ Used by `unarchive` and `list` when the archive argument is omitted and stdin is
 
 - Starts in the current working directory.
 - Lists the **current directory only** (Enter on a directory drills in; `..` goes up). Live filtering does not recurse.
-- Typeahead/filter box filters the current listing; an absolute or relative path may be typed/pasted to jump.
+- The input box is a filter **or** a path. Plain text (e.g. `foo`) filters the current listing. Text that looks like a path (starts with `/`, `~`, `.`, or contains `/`) is browsed live: the part up to the last `/` selects the folder shown (relative paths resolve from the current folder), and the rest filters inside it — e.g. typing `~/Downloads/` shows Downloads, `~/Downloads/fo` filters it.
+- **Tab** completes the highlighted entry into the input (folders get a trailing `/`, so their contents preview). **Enter** opens a typed folder (it becomes the current folder) or selects a typed file; on a partial path it opens/selects the highlighted match. A typed folder that does not exist shows `no such directory` until corrected.
 - Files whose extension matches a registered format (today `.zip` and `.rar`) are highlighted as selectable archives.
+- A multi-volume RAR set is listed **once**, as its first volume with a part count (e.g. `name.part1.rar (2 parts)`); later volumes (`.part2.rar`…, `.r00`…) are hidden. Selecting it extracts the whole set.
 - Esc / Ctrl-C cancels → exit `1`.
 
 **Future (not this wave):** shallow recursive listing up to depth 2 under the current directory.

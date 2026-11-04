@@ -33,6 +33,40 @@ func TestExpandInputsNoMatch(t *testing.T) {
 	}
 }
 
+// Real-world names often contain glob characters; an existing path is literal.
+func TestExpandInputsLiteralPathWithBrackets(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "29090D43[ddpanda].part1.rar")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, msgs, err := ExpandInputs([]string{p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != p {
+		t.Fatalf("got %v want [%s]", got, p)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("literal path should not report a glob: %v", msgs)
+	}
+}
+
+func TestExpandInputsBracketGlobStillWorks(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a1.rar", "a2.rar", "a3.rar"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _, err := ExpandInputs([]string{filepath.Join(dir, "a[12].rar")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("character-class glob: got %v", got)
+	}
+}
+
 func TestExpandInputsPlain(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "x.rar")
 	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {

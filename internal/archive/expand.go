@@ -2,13 +2,15 @@ package archive
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
 
 // ExpandInputs expands shell-style globs in the given patterns.
-// Non-glob paths that exist are kept as-is. A glob that matches nothing is an error.
+// A path that exists is always taken literally, even when its name contains
+// glob characters (e.g. "pack[v2].rar"). A glob that matches nothing is an error.
 // Results are de-duplicated and sorted for stable messaging.
 func ExpandInputs(patterns []string) ([]string, []string, error) {
 	if len(patterns) == 0 {
@@ -32,6 +34,10 @@ func ExpandInputs(patterns []string) ([]string, []string, error) {
 
 	for _, pat := range patterns {
 		if !hasGlobMeta(pat) {
+			add(pat)
+			continue
+		}
+		if _, err := os.Lstat(pat); err == nil {
 			add(pat)
 			continue
 		}
