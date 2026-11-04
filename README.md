@@ -8,7 +8,7 @@
 
 <p align="center"><a href="docs/splash.html">Splash page</a></p>
 
-Archive / unarchive CLI with an extensible format plugin system. v1 ships **zip** (including AES-256 passwords) on macOS.
+Archive / unarchive CLI with an extensible format plugin system. v1 ships **zip** (full, including AES-256 passwords) and **rar** (extract / list) on macOS.
 
 ## Docs
 
@@ -16,7 +16,7 @@ Archive / unarchive CLI with an extensible format plugin system. v1 ships **zip*
 - [SPEC](docs/SPEC.md) — commands, flags, exit codes, behavior
 - [ARCHITECTURE](docs/ARCHITECTURE.md) — package map and request flow
 - [IMPLEMENTATION SPEC](docs/IMPLEMENTATION_SPEC.md) — wiring details and archive/unarchive walkthroughs
-- [FORMATS](docs/FORMATS.md) — zip contract and limitations
+- [FORMATS](docs/FORMATS.md) — zip / rar contracts and limitations
 - [Implementation notes](docs/implementation/) — per-feature writeups
 
 ## High-level architecture
@@ -29,6 +29,7 @@ flowchart LR
   cli --> orch[internal/archive]
   orch --> reg[formats.Registry]
   reg --> zip[formats/zip]
+  reg --> rar[formats/rar]
   reg --> future[future formats]
 ```
 
@@ -39,6 +40,7 @@ flowchart LR
 | `internal/archive` | Infer/validate `--format` vs extension; map disk paths to archive names |
 | `internal/formats` | `Format` interface + registry (the extensibility seam) |
 | `internal/formats/zip` | Zip read/write (stdlib + AES via yeka) |
+| `internal/formats/rar` | RAR extract/list (UnRAR CLI preferred, `rardecode` fallback; create unsupported) |
 
 **Request path (archive):** flags → resolve format → build file entries → overwrite check → `Format.Archive(...)`.
 
@@ -61,16 +63,28 @@ go build -o zipstar ./cmd/zipstar
 ./zipstar a ./project
 
 # Archive with explicit output and compression level
-./zipstar archive -o out.zip --level 9 ./project ./notes.txt
+./zipstar a -o out.zip -l 9 ./project ./notes.txt
 
-# Encrypt (short: -e / -p)
-./zipstar a -e -p 'secret' -o secret.zip ./project
+# Encrypt, overwriting an existing archive
+./zipstar a -e -p 'secret' -F -o secret.zip ./project
 
 # Extract
-./zipstar u -p 'secret' secret.zip -C /tmp/out
+./zipstar u -p 'secret' -C /tmp/out secret.zip
 
 # List
 ./zipstar l -v out.zip
+
+# Extract / list a RAR (create is not supported)
+./zipstar u -C /tmp/out archive.rar
+./zipstar l -v archive.rar
+
+# Glob multi-volume RAR parts (coalesces to first volume; status + progress on stderr)
+./zipstar u -C /tmp/out 'multi.part*.rar'
+./zipstar u -P=false -C /tmp/out '*.rar'   # disable the default progress bar (CI / logs)
+
+# Optional: fetch UnRAR for this machine (use --all when packaging release assets)
+./scripts/fetch-unrar.sh
+./scripts/fetch-unrar.sh --all
 
 # Full flags for a subcommand (root --help only shows globals)
 ./zipstar archive --help
@@ -78,7 +92,37 @@ go build -o zipstar ./cmd/zipstar
 
 Aliases: `a` = `archive`, `u` = `unarchive`, `l` = `list`.
 
+### Flags and shortcuts
+
+Every flag has a one-letter shortcut (also shown in `--help`):
+
+| Shortcut | Long flag | Commands | Meaning |
+|----------|-----------|----------|---------|
+| `-f` | `--format` | all | Archive format (e.g. `zip`, `rar`); inferred from extension when omitted |
+| `-F` | `--force` | all | Overwrite existing archive / extracted paths |
+| `-v` | `--verbose` | all | Print each entry (and extra `list` columns) |
+| `-o` | `--output` | `archive` | Output archive path |
+| `-l` | `--level` | `archive` | Compression level `0`–`9` (default `5`) |
+| `-e` | `--encrypt` | `archive` | Encrypt entries (AES-256 for zip) |
+| `-p` | `--password` | `archive`, `unarchive`, `list` | Password |
+| `-C` | `--dir` | `unarchive` | Destination directory (default `.`) |
+| `-P` | `--progress` | `unarchive` | Progress bar, on by default; `-P=false` disables |
+| `-h` | `--help` | all | Help for the command |
+
+Note the case: `-f` is format, `-F` is force; `-p` is password, `-P` is progress. Boolean flags that default to on take an explicit value (`-P=false`).
+
 Password sources: `-p`/`--password`, then `ZIPSTAR_PASSWORD`, then interactive prompt.
+
+### RAR backend
+
+For RAR **list** and **unarchive**, zipstar uses **UnRAR by default** when a binary is available, then falls back to the pure-Go `rardecode` library:
+
+1. Bundled/system UnRAR (`ZIPSTAR_UNRAR`, binary beside zipstar, `third_party/unrar/…`, or `PATH`)
+2. Pure-Go `rardecode` if UnRAR is not found
+
+Force the Go fallback with `ZIPSTAR_UNRAR=off`. See [third_party/unrar/README.md](third_party/unrar/README.md) and [docs/implementation/rar-unrar-backend.md](docs/implementation/rar-unrar-backend.md).
+
+Multi-volume globs (e.g. `multi.part*.rar`) coalesce to the first volume; **all volumes unpack into the same `-C` directory**. Status lines and a live progress bar (on by default; `-P=false` / `--progress=false` to disable) report members as they extract.
 
 ## Test
 
@@ -92,7 +136,7 @@ go test ./...
 cmd/zipstar/           # binary entrypoint
 internal/cli/          # cobra commands
 internal/archive/      # format + path orchestration
-internal/formats/      # Format interface + zip backend
+internal/formats/      # Format interface + zip / rar backends
 docs/                  # SPEC / ARCHITECTURE / IMPLEMENTATION_SPEC / FORMATS
 ```
 

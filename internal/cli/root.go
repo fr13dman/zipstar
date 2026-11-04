@@ -27,23 +27,25 @@ func NewRoot(reg *formats.Registry) *cobra.Command {
 		Short: "Archive and unarchive files (extensible formats; zip first)",
 		Long: `Archive and unarchive files (extensible formats; zip first).
 
-Command-specific flags (such as -e/--encrypt and -p/--password) appear on the
-subcommand help pages, not on this root help:
+Every flag has a one-letter shortcut. Global: -f/--format, -F/--force,
+-v/--verbose. Command-specific flags (such as -e/--encrypt, -p/--password,
+-l/--level, -P/--progress) appear on the subcommand help pages:
 
   zipstar archive --help
   zipstar unarchive --help
   zipstar list --help`,
 		Example: `  zipstar archive --help
-  zipstar a -e -p secret -o out.zip ./folder
-  zipstar u -p secret out.zip -C /tmp/out
-  zipstar l -v out.zip`,
+  zipstar a -e -p secret -l 9 -o out.zip ./folder
+  zipstar u -p secret -C /tmp/out out.zip
+  zipstar u -F -P=false -C /tmp/out 'multi.part*.rar'
+  zipstar l -v -f rar archive.rar`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 
-	root.PersistentFlags().StringVar(&opts.Format, "format", "", "archive format (inferred from extension when omitted)")
+	root.PersistentFlags().StringVarP(&opts.Format, "format", "f", "", "archive format (inferred from extension when omitted)")
 	root.PersistentFlags().BoolVarP(&opts.Verbose, "verbose", "v", false, "print each archived/extracted/listed path detail")
-	root.PersistentFlags().BoolVar(&opts.Force, "force", false, "overwrite existing files")
+	root.PersistentFlags().BoolVarP(&opts.Force, "force", "F", false, "overwrite existing files")
 
 	root.AddCommand(newArchiveCmd(opts))
 	root.AddCommand(newUnarchiveCmd(opts))

@@ -80,7 +80,7 @@ func TestResolveFormat_Mismatch(t *testing.T) {
 
 func TestResolveFormat_UnknownFormat(t *testing.T) {
 	reg := testRegistry(t)
-	_, err := ResolveFormat(reg, "rar", "out.rar")
+	_, err := ResolveFormat(reg, "7z", "out.7z")
 	if err == nil {
 		t.Fatal("expected error")
 	}

@@ -31,6 +31,32 @@
 - Encrypted deflate level is not finely tunable (see above).
 - Listing encrypted member *contents* requires a password; the encrypted flag and names are available from headers.
 
+## rar
+
+| Property | Value |
+|----------|-------|
+| Name | `rar` |
+| Extensions | `.rar` |
+| Create | **Not supported** (`Archive` → `formats.ErrArchiveNotSupported`, CLI exit `1`) |
+| Extract / list | Prefer bundled/system **UnRAR** CLI; fall back to `github.com/nwaples/rardecode/v2` |
+| Encryption | Password via existing CLI resolution; supports per-file and header encryption |
+| Solid | Supported (sequential `Next` + read) |
+| Multi-volume | Supported when volumes are adjacent; pass the first volume path or a glob over parts (CLI coalesces) |
+| Symlinks | Restored when headers encode Unix/Windows symlink link types |
+| Modes / times | Best-effort from RAR host attributes; owner read ensured on extract |
+| xattrs / resource forks | **Not** preserved |
+
+### Known limitations
+
+- No RAR writer (patent / no open encoder).
+- `--level` and `--encrypt` on `archive` do not apply (create unsupported).
+- Windows / MS-DOS attribute bits map imperfectly to Unix modes (rardecode path).
+- Listing without a password works when headers are readable; header-encrypted (`-hp`) archives require a password for list and extract.
+- `.cbr` and other non-`.rar` extensions are not registered.
+- UnRAR is shipped as **per-platform release assets** (`unrar-darwin-arm64`, …). Unsupported arches (e.g. linux/arm64 today) use rardecode unless `ZIPSTAR_UNRAR` is set. Set `ZIPSTAR_UNRAR=off` to force rardecode.
+
+See `docs/implementation/rar-archive-unarchive.md` and `docs/implementation/rar-unrar-backend.md`.
+
 ## Future formats
 
 New formats register through `formats.Format` with their own extension list. Reserved ideas: `tar`, `tar.gz`, `tar.zst`. Each must document path rules, compression, and encryption (if any) in this file.

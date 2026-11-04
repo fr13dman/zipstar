@@ -3,8 +3,10 @@
 The **plugin seam** for archive backends.
 
 - `format.go` — `Format` interface and option structs
+- `errors.go` — shared sentinels (e.g. `ErrArchiveNotSupported`)
 - `registry.go` — name + extension lookup
-- `zip/` — first concrete backend
+- `zip/` — zip create/extract/list
+- `rar/` — rar extract/list (create unsupported)
 
 ## Adding a format
 

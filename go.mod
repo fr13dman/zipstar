@@ -3,6 +3,7 @@ module github.com/fr13dman/zipstar-cli
 go 1.27.3
 
 require (
+	github.com/nwaples/rardecode/v2 v2.4.5
 	github.com/spf13/cobra v1.10.2
 	github.com/yeka/zip v0.0.0-20231116150916-03d6312748a9
 	golang.org/x/term v0.47.0

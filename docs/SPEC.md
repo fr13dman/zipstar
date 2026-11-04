@@ -27,11 +27,11 @@ zipstar archive|a [flags] <paths...>
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-o, --output` | derived | Output archive path. If omitted: `<basename-of-first-input>.<ext>` |
-| `--format` | inferred | Format name (e.g. `zip`) |
-| `--level` | `5` | Compression level `0`–`9` |
+| `-f, --format` | inferred | Format name (e.g. `zip`) |
+| `-l, --level` | `5` | Compression level `0`–`9` |
 | `-e, --encrypt` | off | Encrypt entries (AES-256 for zip) |
 | `-p, --password` | unset | Password (see Password resolution) |
-| `--force` | off | Overwrite existing output archive |
+| `-F, --force` | off | Overwrite existing output archive |
 | `-v, --verbose` | off | Print each archived entry name |
 
 Root `zipstar --help` lists global flags only; use `zipstar archive --help` (or `a -h`) for the full archive flag set.
@@ -39,16 +39,19 @@ Root `zipstar --help` lists global flags only; use `zipstar archive --help` (or 
 ### Unarchive
 
 ```
-zipstar unarchive|u [flags] <archive>
+zipstar unarchive|u [flags] <archive|glob>...
 ```
 
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-C, --dir` | `.` | Destination directory |
-| `--format` | inferred | Format name |
+| `-f, --format` | inferred | Format name |
 | `-p, --password` | unset | Password when archive is encrypted |
-| `--force` | off | Overwrite existing extracted paths |
-| `-v, --verbose` | off | Print each extracted entry name |
+| `-F, --force` | off | Overwrite existing extracted paths |
+| `-P, --progress` | on | Progress bar on stderr; `-P=false` disables it |
+| `-v, --verbose` | off | Print each extracted entry name on stdout |
+
+Arguments may be concrete paths or shell-style globs (`*.rar`, `multi.part*.rar`). Status lines (glob matches, multi-volume coalescing, per-archive labels, completion) go to **stderr**. Multi-volume RAR sets matched by a glob are extracted once from the first volume; sibling parts are opened automatically beside it.
 
 ### List
 
@@ -58,9 +61,11 @@ zipstar list|l [flags] <archive>
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--format` | inferred | Format name |
-| `-p, --password` | unset | Optional; not required for zip header listing |
+| `-f, --format` | inferred | Format name |
+| `-p, --password` | unset | Optional when headers are readable (zip; RAR without header encryption). Required when headers are encrypted (RAR `-hp`) |
 | `-v, --verbose` | off | Add method and encrypted flag columns |
+
+Every flag has a one-letter shortcut. Case matters: `-f` format / `-F` force, `-p` password / `-P` progress.
 
 Default list line: `name<TAB>size<TAB>mode`  
 Verbose list line: `name<TAB>size<TAB>mode<TAB>method<TAB>plain|encrypted`
@@ -103,9 +108,22 @@ Refuse to overwrite an existing archive or extracted path unless `--force` is se
 
 ## Verbosity and errors
 
-- Default: no progress output; errors go to stderr with enough context to act.
-- `-v`: print per-entry names (and extra list columns).
+- `unarchive` prints short status messages to stderr (what will be extracted / multi-volume notes / done).
+- `unarchive` draws a progress bar on stderr by default; pass `-P=false` / `--progress=false` for log-friendly output (CI, piping), which keeps the plain status lines.
+- `-v`: print per-entry names on stdout (and extra list columns for `list`).
+- Errors go to stderr with enough context to act.
+
+## Format capabilities
+
+| Format | Create (`archive`) | Extract (`unarchive`) | List |
+|--------|--------------------|------------------------|------|
+| `zip` | Yes | Yes | Yes |
+| `rar` | **No** — exit `1` with a clear message | Yes | Yes |
+
+For multi-volume RAR, pass the **first** volume path **or** a glob over the parts (zipstar coalesces to the first volume). Sibling parts must sit in the same directory.
+
+RAR extract prefers a bundled/system **UnRAR** binary (per-platform release assets such as `unrar-darwin-arm64` beside the zipstar binary). If none is found, zipstar falls back to pure-Go decoding. Override with `ZIPSTAR_UNRAR=/path/to/unrar` or `ZIPSTAR_UNRAR=off`.
 
 ## Out of scope (v1)
 
-Exclude globs, xattrs / resource forks / Finder flags, `--json` list output, ZipCrypto, non-zip formats.
+Exclude xattrs / resource forks / Finder flags, `--json` list output, ZipCrypto, creating RAR archives, brace-style shell expansion, and formats other than zip/rar (e.g. `tar*`).

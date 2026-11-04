@@ -25,9 +25,10 @@ flowchart TB
     registry["formats.Registry"]
     iface["formats.Format"]
     zipPkg["formats/zip"]
+    rarPkg["formats/rar"]
   end
 
-  main -->|"Register(zip); Execute(reg)"| root
+  main -->|"Register zip+rar; Execute(reg)"| root
   root --> archiveCmd
   root --> unarchiveCmd
   root --> listCmd
@@ -40,6 +41,7 @@ flowchart TB
   resolve --> registry
   registry --> iface
   iface --> zipPkg
+  iface --> rarPkg
   archiveCmd -->|"Format.Archive"| iface
   unarchiveCmd -->|"Format.Unarchive"| iface
   listCmd -->|"Format.List"| iface
@@ -48,7 +50,7 @@ flowchart TB
 ### Startup (`cmd/zipstar/main.go`)
 
 1. Create an empty `formats.Registry`.
-2. Register each backend (`zipfmt.New()` today).
+2. Register each backend (`zipfmt.New()`, `rarfmt.New()`).
 3. Hand the registry to `cli.Execute`, which builds the cobra tree and maps errors to exit codes `0` / `1` / `2`.
 
 `main` is intentionally thin: **new formats are registered here**, not inside cobra command files.
@@ -58,9 +60,10 @@ flowchart TB
 | Package | Owns | Does not own |
 |---------|------|----------------|
 | `internal/cli` | Flags, aliases, password precedence, exit-code wrapping, verbose callbacks | Bytes on disk / zip crypto |
-| `internal/archive` | Format inference/mismatch, path → archive names, overwrite policy helpers | Concrete zip/tar I/O |
-| `internal/formats` | `Format` interface, `Registry`, option structs | CLI flag names |
+| `internal/archive` | Format inference/mismatch, path → archive names, overwrite policy helpers | Concrete zip/tar/rar I/O |
+| `internal/formats` | `Format` interface, `Registry`, option structs, `ErrArchiveNotSupported` | CLI flag names |
 | `internal/formats/zip` | Reading/writing `.zip`, AES via yeka, deflate levels for plain zips | Password prompting |
+| `internal/formats/rar` | RAR extract/list via rardecode; create returns `ErrArchiveNotSupported` | Password prompting |
 
 Formats only ever see a resolved password string (or empty). They must not log it.
 

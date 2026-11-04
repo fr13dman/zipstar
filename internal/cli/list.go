@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -80,9 +81,14 @@ func runList(ctx context.Context, opts *Options, a listArgs) error {
 }
 
 // archiveLooksEncrypted lists with no password and checks the Encrypted flag.
+// Formats that encrypt headers (e.g. RAR -hp) may fail List without a password;
+// those errors are treated as "encrypted" so the CLI can prompt.
 func archiveLooksEncrypted(ctx context.Context, format formats.Format, path string) (bool, error) {
 	entries, err := format.List(ctx, formats.ListOpts{Archive: path})
 	if err != nil {
+		if looksLikePasswordRequired(err) {
+			return true, nil
+		}
 		return false, err
 	}
 	for _, e := range entries {
@@ -91,4 +97,12 @@ func archiveLooksEncrypted(ctx context.Context, format formats.Format, path stri
 		}
 	}
 	return false, nil
+}
+
+func looksLikePasswordRequired(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "password") || strings.Contains(msg, "encrypted")
 }

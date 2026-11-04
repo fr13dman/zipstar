@@ -12,6 +12,7 @@ internal/cli/         # cobra commands, flags, password resolution, exit codes
 internal/archive/     # format resolution, path → archive entry mapping, overwrite checks
 internal/formats/     # Format interface + Registry
 internal/formats/zip/ # zip implementation (stdlib + yeka for AES)
+internal/formats/rar/ # rar extract/list (rardecode/v2; create unsupported)
 ```
 
 ## Request flow
@@ -23,9 +24,10 @@ flowchart LR
   validate --> paths[internal/archive]
   paths --> fmt[formats.Format]
   fmt --> zip[formats/zip]
+  fmt --> rar[formats/rar]
 ```
 
-1. **`main`** constructs a `formats.Registry`, registers `zip`, calls `cli.Execute`.
+1. **`main`** constructs a `formats.Registry`, registers `zip` and `rar`, calls `cli.Execute`.
 2. **`cli`** parses cobra flags, resolves password if needed, maps errors to exit codes `1` / `2`.
 3. **`archive.ResolveFormat`** applies SPEC inference / mismatch rules.
 4. **`archive.BuildEntries`** turns user paths into `formats.FileEntry` values (base-name roots).
@@ -52,6 +54,8 @@ type Format interface {
 
 No cobra command changes are required beyond optional format-specific flags later.
 
+Registered today: **zip** (full) and **rar** (extract/list).
+
 ## Password handling
 
 Lives in `internal/cli` so formats only receive a resolved password string (or empty). Formats must not log passwords.
@@ -62,6 +66,7 @@ Lives in `internal/cli` so formats only receive a resolved password string (or e
 - Temp dirs via `t.TempDir()` for filesystem round-trips.
 - Format inference / mismatch tests in `internal/archive`.
 - Zip round-trip, symlink, overwrite, encrypt/decrypt in `internal/formats/zip`.
+- RAR extract/list fixtures in `internal/formats/rar`.
 - Password precedence in `internal/cli`.
 
 Run: `go test ./...`

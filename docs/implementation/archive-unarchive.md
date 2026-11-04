@@ -39,6 +39,7 @@ Registering the format (extensibility):
 ```go
 reg := formats.NewRegistry()
 reg.Register(zipfmt.New())
+reg.Register(rarfmt.New())
 ```
 
 Creating a zip:
@@ -60,6 +61,8 @@ format.Archive(ctx, formats.ArchiveOpts{
 
 ## Follow-ups
 
-- Exclude globs
 - Preserve xattrs on macOS
 - Additional formats (`tar.gz`)
+
+RAR extract/list is documented in [rar-archive-unarchive.md](rar-archive-unarchive.md).
+Unarchive globs / multi-volume coalescing / progress: [unarchive-globs-progress.md](unarchive-globs-progress.md).

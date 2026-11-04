@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -36,7 +37,7 @@ func newArchiveCmd(opts *Options) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "output archive path (derived from first input when omitted)")
-	cmd.Flags().IntVar(&level, "level", 5, "compression level 0-9 (0=fastest, 9=smallest)")
+	cmd.Flags().IntVarP(&level, "level", "l", 5, "compression level 0-9 (0=fastest, 9=smallest)")
 	cmd.Flags().BoolVarP(&encrypt, "encrypt", "e", false, "encrypt archive entries with AES-256")
 	cmd.Flags().StringVarP(&password, "password", "p", "", "archive password (or set ZIPSTAR_PASSWORD; prompted if needed)")
 
@@ -117,6 +118,9 @@ func runArchive(ctx context.Context, opts *Options, a archiveArgs) error {
 		Force:    opts.Force,
 		OnFile:   onFile,
 	}); err != nil {
+		if errors.Is(err, formats.ErrArchiveNotSupported) {
+			return Usagef("%v", err)
+		}
 		return Runtimef("%v", err)
 	}
 	return nil
