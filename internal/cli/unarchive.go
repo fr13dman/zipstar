@@ -17,13 +17,18 @@ func newUnarchiveCmd(opts *Options) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "unarchive [flags] <archive>",
+		Use:     "unarchive [flags] [<archive>]",
 		Aliases: []string{"u"},
 		Short:   "Extract an archive",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MaximumNArgs(1),
+		ValidArgsFunction: archivePathCompletion(opts.Registry),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			archivePath, err := resolveArchiveArg(args, opts.Registry)
+			if err != nil {
+				return err
+			}
 			return runUnarchive(cmd.Context(), opts, unarchiveArgs{
-				archive:  args[0],
+				archive:  archivePath,
 				dir:      dir,
 				password: password,
 				passSet:  cmd.Flags().Changed("password"),
@@ -82,9 +87,12 @@ func runUnarchive(ctx context.Context, opts *Options, a unarchiveArgs) error {
 		dest = "."
 	}
 
-	var onFile func(string)
-	if opts.Verbose {
-		onFile = func(name string) { fmt.Println(name) }
+	count := 0
+	onFile := func(name string) {
+		count++
+		if opts.Verbose {
+			fmt.Println(name)
+		}
 	}
 
 	if err := format.Unarchive(ctx, formats.UnarchiveOpts{
@@ -96,6 +104,7 @@ func runUnarchive(ctx context.Context, opts *Options, a unarchiveArgs) error {
 	}); err != nil {
 		return Runtimef("%v", err)
 	}
+	printSuccessHint("extracted %d entries to %s", count, dest)
 	return nil
 }
 

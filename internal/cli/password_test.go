@@ -1,9 +1,79 @@
 package cli
 
 import (
+	"bytes"
+	"io"
 	"os"
+	"strings"
 	"testing"
 )
+
+func TestReadPasswordMasked(t *testing.T) {
+	in := strings.NewReader("s3cret\n")
+	var out bytes.Buffer
+	got, err := readPasswordMasked(in, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "s3cret" {
+		t.Fatalf("got password %q", got)
+	}
+	if out.String() != "******" {
+		t.Fatalf("mask = %q, want ******", out.String())
+	}
+}
+
+func TestReadPasswordMaskedBackspace(t *testing.T) {
+	// type "ab", backspace, "c", enter
+	in := bytes.NewReader([]byte{'a', 'b', 127, 'c', '\n'})
+	var out bytes.Buffer
+	got, err := readPasswordMasked(in, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ac" {
+		t.Fatalf("got password %q", got)
+	}
+	if out.String() != "**\b \b*" {
+		t.Fatalf("unexpected mask stream %q", out.String())
+	}
+}
+
+func TestReadPasswordMaskedCtrlC(t *testing.T) {
+	in := bytes.NewReader([]byte{'x', 0x03})
+	var out bytes.Buffer
+	_, err := readPasswordMasked(in, &out)
+	if err == nil {
+		t.Fatal("expected interrupt error")
+	}
+}
+
+func TestReadPasswordMaskedUTF8(t *testing.T) {
+	in := strings.NewReader("päss\n")
+	var out bytes.Buffer
+	got, err := readPasswordMasked(in, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "päss" {
+		t.Fatalf("got %q", got)
+	}
+	if out.String() != "****" {
+		t.Fatalf("mask = %q", out.String())
+	}
+}
+
+func TestReadPasswordMaskedEOF(t *testing.T) {
+	in := strings.NewReader("ab")
+	var out bytes.Buffer
+	got, err := readPasswordMasked(in, &out)
+	if err != nil && err != io.EOF {
+		t.Fatal(err)
+	}
+	if got != "ab" {
+		t.Fatalf("got %q", got)
+	}
+}
 
 func TestResolvePasswordPrecedence(t *testing.T) {
 	t.Setenv(passwordEnv, "from-env")

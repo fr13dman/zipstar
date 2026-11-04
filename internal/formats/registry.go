@@ -71,3 +71,14 @@ func (r *Registry) Names() []string {
 	}
 	return out
 }
+
+// Extensions returns registered file extensions (including the leading dot) in arbitrary order.
+func (r *Registry) Extensions() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.byExt))
+	for ext := range r.byExt {
+		out = append(out, ext)
+	}
+	return out
+}
