@@ -30,9 +30,11 @@ zipstar archive|a [flags] <paths...>
 | `--format` | inferred | Format name (e.g. `zip`) |
 | `--level` | `5` | Compression level `0`–`9` |
 | `-e, --encrypt` | off | Encrypt entries (AES-256 for zip) |
-| `--password` | unset | Password (see Password resolution) |
+| `-p, --password` | unset | Password (see Password resolution) |
 | `--force` | off | Overwrite existing output archive |
 | `-v, --verbose` | off | Print each archived entry name |
+
+Root `zipstar --help` lists global flags only; use `zipstar archive --help` (or `a -h`) for the full archive flag set.
 
 ### Unarchive
 
@@ -44,7 +46,7 @@ zipstar unarchive|u [flags] [<archive>]
 |------|---------|---------|
 | `-C, --dir` | `.` | Destination directory |
 | `--format` | inferred | Format name |
-| `--password` | unset | Password when archive is encrypted |
+| `-p, --password` | unset | Password when archive is encrypted |
 | `--force` | off | Overwrite existing extracted paths |
 | `-v, --verbose` | off | Print each extracted entry name |
 
@@ -61,7 +63,7 @@ zipstar list|l [flags] [<archive>]
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--format` | inferred | Format name |
-| `--password` | unset | Optional; not required for zip header listing |
+| `-p, --password` | unset | Optional; not required for zip header listing |
 | `-v, --verbose` | off | Add method and encrypted flag columns |
 
 Default list line: `name<TAB>size<TAB>mode`  
@@ -114,7 +116,7 @@ Refuse to overwrite an existing archive or extracted path unless `--force` is se
 
 - Creating an encrypted archive requires `--encrypt`.
 - Providing `--password` without `--encrypt` on `archive` is an error.
-- Password resolution order: `--password` → env `ZIPSTAR_PASSWORD` → interactive prompt when a TTY is available (each character masked as `*`; backspace supported).
+- Password resolution order: `-p`/`--password` → env `ZIPSTAR_PASSWORD` → interactive prompt when a TTY is available (each character masked as `*`; backspace supported).
 - Wrong or missing password → exit `2` with a clear message (no need for `-v`).
 
 ## Shell completion

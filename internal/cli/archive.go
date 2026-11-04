@@ -38,7 +38,7 @@ func newArchiveCmd(opts *Options) *cobra.Command {
 	cmd.Flags().StringVarP(&output, "output", "o", "", "output archive path (derived from first input when omitted)")
 	cmd.Flags().IntVar(&level, "level", 5, "compression level 0-9 (0=fastest, 9=smallest)")
 	cmd.Flags().BoolVarP(&encrypt, "encrypt", "e", false, "encrypt archive entries with AES-256")
-	cmd.Flags().StringVar(&password, "password", "", "archive password (or set ZIPSTAR_PASSWORD; prompted if needed)")
+	cmd.Flags().StringVarP(&password, "password", "p", "", "archive password (or set ZIPSTAR_PASSWORD; prompted if needed)")
 
 	return cmd
 }

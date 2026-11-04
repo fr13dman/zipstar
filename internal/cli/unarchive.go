@@ -37,7 +37,7 @@ func newUnarchiveCmd(opts *Options) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&dir, "dir", "C", "", "destination directory (default: current directory)")
-	cmd.Flags().StringVar(&password, "password", "", "archive password (or set ZIPSTAR_PASSWORD; prompted if needed)")
+	cmd.Flags().StringVarP(&password, "password", "p", "", "archive password (or set ZIPSTAR_PASSWORD; prompted if needed)")
 
 	return cmd
 }

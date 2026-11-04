@@ -2,6 +2,8 @@
 
 How a request flows through the code, and how to add a new archive format.
 
+For detailed wiring and step-by-step archive/unarchive use cases, see [IMPLEMENTATION_SPEC.md](IMPLEMENTATION_SPEC.md).
+
 ## Package map
 
 ```

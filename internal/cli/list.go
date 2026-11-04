@@ -33,7 +33,7 @@ func newListCmd(opts *Options) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&password, "password", "", "archive password (or set ZIPSTAR_PASSWORD; prompted if needed)")
+	cmd.Flags().StringVarP(&password, "password", "p", "", "archive password (or set ZIPSTAR_PASSWORD; prompted if needed)")
 	return cmd
 }
 
