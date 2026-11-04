@@ -1,0 +1,6 @@
+# Platform binaries are fetched by scripts/fetch-unrar.sh and shipped as
+# release assets — do not commit the binaries themselves.
+*/
+!LICENSE.txt
+!README.md
+!.gitignore

@@ -1,5 +1,6 @@
 /zipstar
 /bin/
+/dist/
 *.zip
 .DS_Store
 *.exe

@@ -34,6 +34,7 @@ type UnarchiveOpts struct {
 	Password string
 	Force    bool
 	OnFile   func(name string)
+	OnVolume func(path string) // optional; called as a multi-volume backend starts reading each volume
 }
 
 // ListOpts controls listing archive contents.

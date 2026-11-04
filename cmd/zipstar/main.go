@@ -10,11 +10,13 @@ import (
 
 	"github.com/fr13dman/zipstar-cli/internal/cli"
 	"github.com/fr13dman/zipstar-cli/internal/formats"
+	rarfmt "github.com/fr13dman/zipstar-cli/internal/formats/rar"
 	zipfmt "github.com/fr13dman/zipstar-cli/internal/formats/zip"
 )
 
 func main() {
 	reg := formats.NewRegistry()
 	reg.Register(zipfmt.New())
+	reg.Register(rarfmt.New())
 	os.Exit(cli.Execute(reg))
 }

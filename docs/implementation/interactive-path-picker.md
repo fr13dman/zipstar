@@ -57,8 +57,13 @@ unarchive/list (no <archive>)
 
 - Start in cwd; `ReadDir` current directory only
 - Enter on directory drills in; `..` goes up
-- Filter box typeahead; absolute/relative/`~` path jumps on Enter
+- Filter box typeahead for plain text
+- Typed/pasted paths (absolute, relative, `~`, `..`) browse live: the model keeps `dir` (committed folder) and `viewDir` (folder listed for the current input). `inputView` splits the input at the last `/` — the directory part sets `viewDir`, the rest filters inside it. Typing never commits; Enter does (`enterDir`).
+- Tab completes the highlighted entry (`complete`); folders gain a trailing `/` so the next listing previews them
+- Enter: exact typed folder → switch to it; exact typed file → select; partial path → open/select the highlighted match
+- Missing typed folder shows `no such directory: …` live; backspacing restores the listing
 - Archives (registered extensions) highlighted and selectable
+- Multi-volume RAR sets grouped via `archive.VolumeOf`: only the first volume is listed, labelled `(N parts)`; later volumes are hidden so a mid-set part cannot be picked. The CLI's `DiscoverVolumes` then extracts the full set from that path.
 - Esc / Ctrl-C → `ErrCanceled` → exit code 1
 
 ### Sniff + cache
@@ -87,7 +92,7 @@ zipstar completion zsh > "${fpath[1]}/_zipstar"
 
 ## Tests
 
-- `internal/cli/picker` — filter, drill, select, cancel, path jump, reject non-archive
+- `internal/cli/picker` — filter, drill, select, cancel, path jump, reject non-archive; live path browsing driven by real key messages (per-keystroke typing, paste, `~/`, `..`, Tab completion, Enter on partial path, missing-folder error + recovery)
 - `internal/detect` — zip positive/negative, cache hit/stale
 - `internal/archive` — sniff no-extension resolve; `--format` mismatch still errors
 - `internal/cli` — missing arg non-TTY usage; picker stub + fake TTY extract; completion fixture

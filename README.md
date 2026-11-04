@@ -8,7 +8,7 @@
 
 <p align="center"><a href="docs/splash.html">Splash page</a></p>
 
-Archive / unarchive CLI with an extensible format plugin system. v1 ships **zip** (including AES-256 passwords) on macOS.
+Archive / unarchive CLI with an extensible format plugin system. v1 ships **zip** (full, including AES-256 passwords) and **rar** (extract / list) on macOS.
 
 ## Docs
 
@@ -16,8 +16,8 @@ Archive / unarchive CLI with an extensible format plugin system. v1 ships **zip*
 - [SPEC](docs/SPEC.md) — commands, flags, exit codes, behavior
 - [ARCHITECTURE](docs/ARCHITECTURE.md) — packages, request flow, interactive paths
 - [IMPLEMENTATION SPEC](docs/IMPLEMENTATION_SPEC.md) — wiring details and archive/unarchive walkthroughs
-- [FORMATS](docs/FORMATS.md) — zip contract and limitations
-- [Implementation notes](docs/implementation/) — feature writeups (picker, AES passwords, …)
+- [FORMATS](docs/FORMATS.md) — zip / rar contracts and limitations
+- [Implementation notes](docs/implementation/) — feature writeups (picker, AES passwords, RAR, globs + progress, …)
 
 ## High-level architecture
 
@@ -29,6 +29,7 @@ flowchart LR
   cli --> orch[internal/archive]
   orch --> reg[formats.Registry]
   reg --> zip[formats/zip]
+  reg --> rar[formats/rar]
   reg --> future[future formats]
 ```
 
@@ -41,6 +42,7 @@ flowchart LR
 | `internal/detect` | Magic-byte sniff + on-disk sniff cache |
 | `internal/formats` | `Format` interface + registry (the extensibility seam) |
 | `internal/formats/zip` | Zip read/write (stdlib + AES via yeka) |
+| `internal/formats/rar` | RAR extract/list (UnRAR CLI preferred, `rardecode` fallback; create unsupported) |
 
 **Request path (archive):** flags → resolve format → build file entries → overwrite check → `Format.Archive(...)`.
 
@@ -56,6 +58,30 @@ Requires Go 1.22+ (developed with Go 1.27).
 go build -o zipstar ./cmd/zipstar
 ```
 
+## Install
+
+The installers build zipstar for the current machine, install it with a matching UnRAR binary (for fast RAR extraction), and add the install folder to your PATH if it isn't already there.
+
+**macOS / Linux** — installs to `/usr/local/bin` (uses `sudo` only if that folder isn't writable):
+
+```bash
+./scripts/install.sh                      # /usr/local/bin
+./scripts/install.sh --prefix ~/.local/bin   # somewhere else
+./scripts/install.sh --uninstall          # remove it again (same --prefix if you used one)
+```
+
+**Windows (PowerShell)** — installs per-user to `%LOCALAPPDATA%\Programs\zipstar` (no admin needed) and adds it to your user PATH:
+
+```powershell
+.\scripts\install.ps1
+.\scripts\install.ps1 -Prefix C:\tools\zipstar
+.\scripts\install.ps1 -Uninstall
+```
+
+Options: `--no-unrar` / `-NoUnrar` skips UnRAR (zipstar falls back to its built-in RAR decoder), `--no-path` / `-NoPath` leaves PATH alone, `--unrar FILE` / `-Unrar FILE` installs a specific UnRAR binary.
+
+UnRAR is installed beside zipstar as `unrar-<os>-<arch>`, so it never replaces a system or Homebrew `unrar`. `/usr/sbin` is not used: macOS System Integrity Protection blocks writes to it even with `sudo`, and on Linux it is reserved for system administration tools. Details: [installer](docs/implementation/installer.md).
+
 ## Usage
 
 ```bash
@@ -63,19 +89,17 @@ go build -o zipstar ./cmd/zipstar
 ./zipstar a ./project
 
 # Archive with explicit output and compression level
-./zipstar archive -o out.zip --level 9 ./project ./notes.txt
+./zipstar a -o out.zip -l 9 ./project ./notes.txt
 
 # Encrypt (-e); omit -p on a TTY to get a masked prompt: Password: ******
 ./zipstar a -e -o secret.zip ./project
 
-# Encrypt with explicit password (visible on the command line — prefer prompt/env)
-./zipstar a -e -p 'secret' -o secret.zip ./project
+# Encrypt with explicit password (visible on the command line — prefer prompt/env),
+# overwriting an existing archive
+./zipstar a -e -p 'secret' -F -o secret.zip ./project
 
-# Extract to another directory
-./zipstar u secret.zip -C /tmp/out
-
-# Extract encrypted archive (TTY prompts Password: ****** if flag/env unset)
-./zipstar u secret.zip -C /tmp/out
+# Extract to another directory (TTY prompts Password: ****** if encrypted and flag/env unset)
+./zipstar u -C /tmp/out secret.zip
 
 # Interactive extract/list (TTY): omit <archive> to open the path picker
 ./zipstar u -C /tmp/out
@@ -84,7 +108,19 @@ go build -o zipstar ./cmd/zipstar
 # List
 ./zipstar l -v out.zip
 
-# Shell completion (zsh example) — unarchive/list complete dirs + *.zip
+# Extract / list a RAR (create is not supported)
+./zipstar u -C /tmp/out archive.rar
+./zipstar l -v archive.rar
+
+# Glob multi-volume RAR parts (coalesces to first volume; status + progress on stderr)
+./zipstar u -C /tmp/out 'multi.part*.rar'
+./zipstar u -P=false -C /tmp/out '*.rar'   # disable the default progress bar (CI / logs)
+
+# Optional: fetch UnRAR for this machine (use --all when packaging release assets)
+./scripts/fetch-unrar.sh
+./scripts/fetch-unrar.sh --all
+
+# Shell completion (zsh example) — unarchive/list complete dirs + *.zip / *.rar
 ./zipstar completion zsh > "${fpath[1]}/_zipstar"
 
 # Full flags for a subcommand (root --help only shows globals)
@@ -93,17 +129,40 @@ go build -o zipstar ./cmd/zipstar
 
 Aliases: `a` = `archive`, `u` = `unarchive`, `l` = `list`.
 
-| Shortcut | Long form | Notes |
-|----------|-----------|--------|
-| `-e` | `--encrypt` | Archive only; creates AES-256 zip |
-| `-p` | `--password` | Password (or TTY masked prompt / `ZIPSTAR_PASSWORD`) |
-| `-o` | `--output` | Archive output path |
-| `-C` | `--dir` | Unarchive destination (default `.`) |
-| `-v` | `--verbose` | Per-entry / extra list columns |
+### Flags and shortcuts
+
+Every flag has a one-letter shortcut (also shown in `--help`):
+
+| Shortcut | Long flag | Commands | Meaning |
+|----------|-----------|----------|---------|
+| `-f` | `--format` | all | Archive format (e.g. `zip`, `rar`); inferred from extension when omitted |
+| `-F` | `--force` | all | Overwrite existing archive / extracted paths |
+| `-v` | `--verbose` | all | Print each entry (and extra `list` columns) |
+| `-o` | `--output` | `archive` | Output archive path |
+| `-l` | `--level` | `archive` | Compression level `0`–`9` (default `5`) |
+| `-e` | `--encrypt` | `archive` | Encrypt entries (AES-256 for zip) |
+| `-p` | `--password` | `archive`, `unarchive`, `list` | Password |
+| `-C` | `--dir` | `unarchive` | Destination directory (default `.`) |
+| `-P` | `--progress` | `unarchive` | Progress bar, on by default; `-P=false` disables |
+| `-h` | `--help` | all | Help for the command |
+| `-V` | `--version` | `zipstar` | Print version, commit, build time, Go version and platform |
+
+Note the case: `-f` is format, `-F` is force; `-p` is password, `-P` is progress; `-v` is verbose, `-V` is version. Boolean flags that default to on take an explicit value (`-P=false`).
 
 Password sources: `-p`/`--password` → `ZIPSTAR_PASSWORD` → interactive masked prompt (`*`) on a TTY.
 
-Interactive path picker and success hints run only when stdin is a TTY. Scripts should pass `<archive>` and passwords via flag/env. Details: [interactive-path-picker](docs/implementation/interactive-path-picker.md), [zip-aes-passwords](docs/implementation/zip-aes-passwords.md).
+The interactive path picker and the `list` success hint run only when stdin is a TTY. Scripts should pass `<archive>` and passwords via flag/env. Details: [interactive-path-picker](docs/implementation/interactive-path-picker.md), [zip-aes-passwords](docs/implementation/zip-aes-passwords.md).
+
+### RAR backend
+
+For RAR **list** and **unarchive**, zipstar uses **UnRAR by default** when a binary is available, then falls back to the pure-Go `rardecode` library:
+
+1. Bundled/system UnRAR (`ZIPSTAR_UNRAR`, binary beside zipstar, `third_party/unrar/…`, or `PATH`)
+2. Pure-Go `rardecode` if UnRAR is not found
+
+Force the Go fallback with `ZIPSTAR_UNRAR=off`. See [third_party/unrar/README.md](third_party/unrar/README.md) and [docs/implementation/rar-unrar-backend.md](docs/implementation/rar-unrar-backend.md).
+
+Multi-volume globs (e.g. `multi.part*.rar`) coalesce to the first volume; **all volumes unpack into the same `-C` directory**. Status lines and a live progress bar (on by default; `-P=false` / `--progress=false` to disable) report members as they extract.
 
 ## Test
 
@@ -115,11 +174,13 @@ go test ./...
 
 ```
 cmd/zipstar/           # binary entrypoint
-internal/cli/          # cobra commands, masked password, completion, TTY hints
+internal/cli/          # cobra commands, masked password, completion, progress, TTY hints
 internal/cli/picker/   # Bubble Tea archive path picker
-internal/archive/      # format resolve (ext + sniff) + path orchestration
+internal/archive/      # format resolve (ext + sniff), globs, multi-volume coalescing
 internal/detect/       # content sniff + cache
-internal/formats/      # Format interface + zip backend
+internal/formats/      # Format interface + zip / rar backends
+scripts/               # install.sh / install.ps1 (build + install), fetch-unrar.sh (UnRAR release assets)
+third_party/unrar/     # UnRAR license + fetched binaries (binaries not committed)
 docs/                  # SPEC / ARCHITECTURE / IMPLEMENTATION_SPEC / FORMATS / implementation
 ```
 

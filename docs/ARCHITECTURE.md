@@ -8,12 +8,13 @@ For detailed wiring and step-by-step archive/unarchive use cases, see [IMPLEMENT
 
 ```
 cmd/zipstar/              # main: build registry, register formats, exit
-internal/cli/             # cobra commands, flags, password, TTY hints, completion
+internal/cli/             # cobra commands, flags, password, progress, TTY hints, completion
 internal/cli/picker/      # Bubble Tea archive path picker (unarchive/list)
-internal/archive/         # format resolution (ext + sniff), path → entries, overwrite
+internal/archive/         # format resolution (ext + sniff), globs, multi-volume coalescing, path → entries
 internal/detect/          # content sniff + on-disk sniff cache
 internal/formats/         # Format interface + Registry
 internal/formats/zip/     # zip implementation (stdlib + yeka for AES)
+internal/formats/rar/     # rar extract/list (UnRAR CLI preferred, rardecode fallback; create unsupported)
 ```
 
 | Package / file | Responsibility |
@@ -42,10 +43,11 @@ flowchart LR
   resolve --> detect[detect sniff]
   resolve --> fmt[formats.Format]
   fmt --> zip[formats/zip]
+  fmt --> rar[formats/rar]
 ```
 
-1. **`main`** constructs a `formats.Registry`, registers `zip`, calls `cli.Execute`.
-2. **`cli`** parses cobra flags; for `unarchive`/`list` without `<archive>` on a TTY, runs the path picker; resolves password if needed; maps errors to exit codes `1` / `2`.
+1. **`main`** constructs a `formats.Registry`, registers `zip` and `rar`, calls `cli.Execute`.
+2. **`cli`** parses cobra flags; for `unarchive`/`list` without `<archive>` on a TTY, runs the path picker; `unarchive` expands globs and coalesces multi-volume RAR sets; resolves password if needed; maps errors to exit codes `1` / `2`.
 3. **`archive.ResolveFormat`** applies SPEC inference / mismatch rules, with content sniff when the extension is missing or unknown.
 4. **`archive.BuildEntries`** turns user paths into `formats.FileEntry` values (base-name roots).
 5. The concrete **`Format`** performs I/O.
@@ -99,6 +101,8 @@ type Format interface {
 
 No cobra command changes are required beyond optional format-specific flags later. Picker highlighting and shell completion pick up new extensions from the registry automatically.
 
+Registered today: **zip** (full) and **rar** (extract/list).
+
 ## Password handling
 
 Lives in `internal/cli` so formats only receive a resolved password string (or empty). Formats must not log passwords.
@@ -131,7 +135,8 @@ Cobra `completion` subcommand plus `ValidArgsFunction` on `unarchive` / `list` (
 - Temp dirs via `t.TempDir()` for filesystem round-trips.
 - Format inference / mismatch / sniff tests in `internal/archive` and `internal/detect`.
 - Zip round-trip, symlink, overwrite, encrypt/decrypt in `internal/formats/zip`.
-- Password precedence, masked reader, picker/completion wiring in `internal/cli`.
+- RAR extract/list fixtures in `internal/formats/rar`.
+- Password precedence, masked reader, picker/completion wiring, progress bar in `internal/cli`.
 
 Run: `go test ./...`
 

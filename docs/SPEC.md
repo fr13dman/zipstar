@@ -18,6 +18,23 @@ macOS is the supported v1 target. Code should remain portable; other OSes are be
 | `unarchive` | `u` | Extract an archive |
 | `list` | `l` | List archive members |
 
+### Version
+
+```
+zipstar --version | -V
+```
+
+Prints the version and exits `0`, e.g.:
+
+```
+zipstar v0.2.0
+  commit: 5245830 (modified)
+  built:  2026-11-04T21:04:38Z
+  go:     go1.27.3 darwin/arm64
+```
+
+The version comes from the build: the installers stamp `git describe --tags --always --dirty`; `go install …@vX.Y.Z` reports that module version; otherwise the Go toolchain's VCS pseudo-version (or `dev`). `commit`/`built` lines appear when the build recorded VCS information. `-v` remains `--verbose`.
+
 ### Archive
 
 ```
@@ -27,11 +44,11 @@ zipstar archive|a [flags] <paths...>
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-o, --output` | derived | Output archive path. If omitted: `<basename-of-first-input>.<ext>` |
-| `--format` | inferred | Format name (e.g. `zip`) |
-| `--level` | `5` | Compression level `0`–`9` |
+| `-f, --format` | inferred | Format name (e.g. `zip`) |
+| `-l, --level` | `5` | Compression level `0`–`9` |
 | `-e, --encrypt` | off | Encrypt entries (AES-256 for zip) |
 | `-p, --password` | unset | Password (see Password resolution) |
-| `--force` | off | Overwrite existing output archive |
+| `-F, --force` | off | Overwrite existing output archive |
 | `-v, --verbose` | off | Print each archived entry name |
 
 Root `zipstar --help` lists global flags only; use `zipstar archive --help` (or `a -h`) for the full archive flag set.
@@ -39,20 +56,23 @@ Root `zipstar --help` lists global flags only; use `zipstar archive --help` (or 
 ### Unarchive
 
 ```
-zipstar unarchive|u [flags] [<archive>]
+zipstar unarchive|u [flags] [<archive|glob>...]
 ```
 
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-C, --dir` | `.` | Destination directory |
-| `--format` | inferred | Format name |
+| `-f, --format` | inferred | Format name |
 | `-p, --password` | unset | Password when archive is encrypted |
-| `--force` | off | Overwrite existing extracted paths |
-| `-v, --verbose` | off | Print each extracted entry name |
+| `-F, --force` | off | Overwrite existing extracted paths |
+| `-P, --progress` | on | Progress bar on stderr; `-P=false` disables it |
+| `-v, --verbose` | off | Print each extracted entry name on stdout |
 
-`<archive>` is required when stdin is not a TTY. When omitted and stdin is a TTY, zipstar opens an interactive path picker (see Interactive path picker). Canceling the picker (Esc) exits with code `1`.
+Arguments may be concrete paths or shell-style globs (`*.rar`, `multi.part*.rar`). A path that exists is always taken literally, even if its name contains glob characters (e.g. `pack[v2].rar`). Passing any single volume of a multi-volume set (e.g. `x.part3.rar`) extracts the whole set, starting from the first volume. Status lines (glob matches, multi-volume coalescing, per-archive labels, completion) go to **stderr**. Multi-volume RAR sets matched by a glob are extracted once from the first volume; sibling parts are opened automatically beside it.
 
-After a successful extract on a TTY, zipstar prints one hint line to stderr, e.g. `extracted N entries to <dir>`. Non-TTY runs stay quiet (unless `-v`).
+At least one argument is required when stdin is not a TTY. When no arguments are given and stdin is a TTY, zipstar opens an interactive path picker (see Interactive path picker) to choose a single archive. Canceling the picker (Esc) exits with code `1`.
+
+After each archive, zipstar prints a summary line to stderr, e.g. `finished multi.part01.rar → <dir> (6 file(s) from 6 volumes)`, followed by `done: extracted N archive(s) into <dir>`. These lines print on TTY and non-TTY runs alike.
 
 ### List
 
@@ -62,9 +82,11 @@ zipstar list|l [flags] [<archive>]
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--format` | inferred | Format name |
-| `-p, --password` | unset | Optional; not required for zip header listing |
+| `-f, --format` | inferred | Format name |
+| `-p, --password` | unset | Optional when headers are readable (zip; RAR without header encryption). Required when headers are encrypted (RAR `-hp`) |
 | `-v, --verbose` | off | Add method and encrypted flag columns |
+
+Every flag has a one-letter shortcut. Case matters: `-f` format / `-F` force, `-p` password / `-P` progress.
 
 Default list line: `name<TAB>size<TAB>mode`  
 Verbose list line: `name<TAB>size<TAB>mode<TAB>method<TAB>plain|encrypted`
@@ -79,8 +101,10 @@ Used by `unarchive` and `list` when the archive argument is omitted and stdin is
 
 - Starts in the current working directory.
 - Lists the **current directory only** (Enter on a directory drills in; `..` goes up). Live filtering does not recurse.
-- Typeahead/filter box filters the current listing; an absolute or relative path may be typed/pasted to jump.
-- Files whose extension matches a registered format (today `.zip`) are highlighted as selectable archives.
+- The input box is a filter **or** a path. Plain text (e.g. `foo`) filters the current listing. Text that looks like a path (starts with `/`, `~`, `.`, or contains `/`) is browsed live: the part up to the last `/` selects the folder shown (relative paths resolve from the current folder), and the rest filters inside it — e.g. typing `~/Downloads/` shows Downloads, `~/Downloads/fo` filters it.
+- **Tab** completes the highlighted entry into the input (folders get a trailing `/`, so their contents preview). **Enter** opens a typed folder (it becomes the current folder) or selects a typed file; on a partial path it opens/selects the highlighted match. A typed folder that does not exist shows `no such directory` until corrected.
+- Files whose extension matches a registered format (today `.zip` and `.rar`) are highlighted as selectable archives.
+- A multi-volume RAR set is listed **once**, as its first volume with a part count (e.g. `name.part1.rar (2 parts)`); later volumes (`.part2.rar`…, `.r00`…) are hidden. Selecting it extracts the whole set.
 - Esc / Ctrl-C cancels → exit `1`.
 
 **Future (not this wave):** shallow recursive listing up to depth 2 under the current directory.
@@ -143,10 +167,23 @@ zipstar completion zsh > "${fpath[1]}/_zipstar"
 
 ## Verbosity and errors
 
-- Default: no progress output; errors go to stderr with enough context to act.
-- `-v`: print per-entry names (and extra list columns).
-- TTY-only success hints (see Unarchive / List) are independent of `-v`.
+- `unarchive` prints short status messages to stderr (what will be extracted / multi-volume notes / per-archive summary / done).
+- `unarchive` draws a progress bar on stderr by default; pass `-P=false` / `--progress=false` for log-friendly output (CI, piping), which keeps the plain status lines.
+- `-v`: print per-entry names on stdout (and extra list columns for `list`).
+- `list` prints a TTY-only success hint (`listed N entries`), independent of `-v`.
+- Errors go to stderr with enough context to act.
+
+## Format capabilities
+
+| Format | Create (`archive`) | Extract (`unarchive`) | List |
+|--------|--------------------|------------------------|------|
+| `zip` | Yes | Yes | Yes |
+| `rar` | **No** — exit `1` with a clear message | Yes | Yes |
+
+For multi-volume RAR, pass the **first** volume path **or** a glob over the parts (zipstar coalesces to the first volume). Sibling parts must sit in the same directory.
+
+RAR extract prefers a bundled/system **UnRAR** binary (per-platform release assets such as `unrar-darwin-arm64` beside the zipstar binary). If none is found, zipstar falls back to pure-Go decoding. Override with `ZIPSTAR_UNRAR=/path/to/unrar` or `ZIPSTAR_UNRAR=off`.
 
 ## Out of scope (v1)
 
-Exclude globs, xattrs / resource forks / Finder flags, `--json` list output, ZipCrypto, non-zip formats, `--no-input` / `CI=1` kill switch, recursive live picker scans, `archive` interactive multi-select, extract confirmation prompts beyond `--force`.
+Exclude xattrs / resource forks / Finder flags, `--json` list output, ZipCrypto, creating RAR archives, brace-style shell expansion, formats other than zip/rar (e.g. `tar*`), `--no-input` / `CI=1` kill switch, recursive live picker scans, `archive` interactive multi-select, extract confirmation prompts beyond `--force`.

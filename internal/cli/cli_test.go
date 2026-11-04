@@ -3,16 +3,20 @@ package cli_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/fr13dman/zipstar-cli/internal/cli"
 	"github.com/fr13dman/zipstar-cli/internal/formats"
+	rarfmt "github.com/fr13dman/zipstar-cli/internal/formats/rar"
 	zipfmt "github.com/fr13dman/zipstar-cli/internal/formats/zip"
+	"github.com/fr13dman/zipstar-cli/internal/version"
 )
 
 type stubPicker struct {
@@ -270,6 +274,354 @@ func TestArchiveHelpShowsEncryptAndPasswordShorts(t *testing.T) {
 	}
 }
 
+// Every flag on every command must have a one-letter shortcut, shown in --help.
+func TestAllFlagsHaveShortcuts(t *testing.T) {
+	want := map[string]map[string]string{
+		"":          {"version": "V", "format": "f", "force": "F", "verbose": "v"}, // root
+		"archive":   {"output": "o", "level": "l", "encrypt": "e", "password": "p", "format": "f", "force": "F", "verbose": "v"},
+		"unarchive": {"dir": "C", "password": "p", "progress": "P", "format": "f", "force": "F", "verbose": "v"},
+		"list":      {"password": "p", "format": "f", "force": "F", "verbose": "v"},
+	}
+	reg := formats.NewRegistry()
+	reg.Register(zipfmt.New())
+	root := cli.NewRoot(reg)
+
+	for name, flags := range want {
+		cmd := root
+		if name != "" {
+			var err error
+			if cmd, _, err = root.Find([]string{name}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetErr(&buf)
+		if err := cmd.Help(); err != nil {
+			t.Fatal(err)
+		}
+		help := buf.String()
+
+		seen := map[string]bool{}
+		check := func(f *pflag.Flag) {
+			if f.Name == "help" {
+				return
+			}
+			seen[f.Name] = true
+			short, ok := flags[f.Name]
+			if !ok {
+				t.Errorf("%s: flag --%s missing from expected shortcut table", name, f.Name)
+				return
+			}
+			if f.Shorthand != short {
+				t.Errorf("%s: --%s shorthand %q want %q", name, f.Name, f.Shorthand, short)
+			}
+			if entry := "-" + short + ", --" + f.Name; !strings.Contains(help, entry) {
+				t.Errorf("%s help missing %q", name, entry)
+			}
+		}
+		cmd.LocalFlags().VisitAll(check)
+		cmd.InheritedFlags().VisitAll(check)
+		for flag := range flags {
+			if !seen[flag] {
+				t.Errorf("%s: expected flag --%s not registered", name, flag)
+			}
+		}
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	want := version.String()
+	if !strings.HasPrefix(want, "zipstar ") || !strings.Contains(want, "go:") {
+		t.Fatalf("unexpected version text: %q", want)
+	}
+	for _, flag := range []string{"--version", "-V"} {
+		reg := formats.NewRegistry()
+		reg.Register(zipfmt.New())
+		root := cli.NewRoot(reg)
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetArgs([]string{flag})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%s: %v", flag, err)
+		}
+		if out.String() != want {
+			t.Fatalf("%s printed %q want %q", flag, out.String(), want)
+		}
+	}
+
+	// -v stays --verbose: it must not print the version.
+	reg := formats.NewRegistry()
+	reg.Register(zipfmt.New())
+	root := cli.NewRoot(reg)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"-v"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), want) {
+		t.Fatalf("-v should not print the version:\n%s", out.String())
+	}
+}
+
+func TestShortFlagsEndToEnd(t *testing.T) {
+	reg := formats.NewRegistry()
+	reg.Register(zipfmt.New())
+
+	src := t.TempDir()
+	file := filepath.Join(src, "a.txt")
+	if err := os.WriteFile(file, []byte("short"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "a.zip")
+	dest := t.TempDir()
+
+	// -f is honoured: naming the wrong format for a .zip path is a usage error.
+	mismatchReg := formats.NewRegistry()
+	mismatchReg.Register(zipfmt.New())
+	mismatchReg.Register(rarfmt.New())
+	root := cli.NewRoot(mismatchReg)
+	root.SetArgs([]string{"a", "-f", "rar", "-o", out, file})
+	var ee *cli.ExitError
+	if err := root.Execute(); !errors.As(err, &ee) || ee.Code != cli.ExitUsage {
+		t.Fatalf("-f rar with .zip output: want usage error, got %v", err)
+	}
+
+	for _, args := range [][]string{
+		{"a", "-f", "zip", "-l", "9", "-o", out, file},
+		{"a", "-f", "zip", "-F", "-e", "-p", "pw", "-o", out, file}, // -F overwrites
+		{"u", "-f", "zip", "-p", "pw", "-P=false", "-C", dest, out},
+		{"u", "-f", "zip", "-p", "pw", "-F", "-P=false", "-C", dest, out}, // -F overwrites extract
+		{"l", "-f", "zip", "-v", out},
+	} {
+		root := cli.NewRoot(reg)
+		var errBuf bytes.Buffer
+		root.SetErr(&errBuf)
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, errBuf.String())
+		}
+		if args[0] == "u" && strings.Contains(errBuf.String(), "extract [") {
+			t.Fatalf("-P=false should disable the bar: %q", errBuf.String())
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dest, "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "short" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRARUnarchiveAndListCLI(t *testing.T) {
+	reg := formats.NewRegistry()
+	reg.Register(rarfmt.New())
+
+	archivePath := filepath.Join("..", "formats", "rar", "testdata", "testfile.rar5.rar")
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	extractDir := t.TempDir()
+
+	root := cli.NewRoot(reg)
+	root.SetArgs([]string{"u", archivePath, "-C", extractDir})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(extractDir, "testfile.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "Testing 123\n" {
+		t.Fatalf("got %q", got)
+	}
+
+	root = cli.NewRoot(reg)
+	root.SetArgs([]string{"l", archivePath})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+}
+
+func TestRARGlobMultiVolumeUnarchiveCLI(t *testing.T) {
+	pattern := filepath.Join("..", "formats", "rar", "testdata", "multivol", "multi.part*.rar")
+
+	for _, engine := range []string{"unrar", "rardecode"} {
+		for _, progress := range []bool{true, false} {
+			name := engine + "/progress=" + map[bool]string{true: "on", false: "off"}[progress]
+			t.Run(name, func(t *testing.T) {
+				if engine == "unrar" {
+					t.Setenv("ZIPSTAR_UNRAR", "")
+					if _, ok := rarfmt.FindUnrar(); !ok {
+						t.Skip("UnRAR not available; run ./scripts/fetch-unrar.sh")
+					}
+				} else {
+					t.Setenv("ZIPSTAR_UNRAR", "off")
+				}
+
+				reg := formats.NewRegistry()
+				reg.Register(rarfmt.New())
+				extractDir := t.TempDir()
+
+				// Progress is on by default; the off case must opt out explicitly.
+				args := []string{"u", pattern, "-C", extractDir}
+				if !progress {
+					args = append(args, "--progress=false")
+				}
+				root := cli.NewRoot(reg)
+				var errBuf bytes.Buffer
+				root.SetErr(&errBuf)
+				root.SetArgs(args)
+				if err := root.Execute(); err != nil {
+					t.Fatalf("unarchive: %v\nstderr=%s", err, errBuf.String())
+				}
+
+				for member, size := range map[string]int64{
+					"exe/test.exe": 45056,
+					"jpg/test.jpg": 40372,
+					"тест.txt":     15498,
+				} {
+					info, err := os.Stat(filepath.Join(extractDir, member))
+					if err != nil {
+						t.Fatalf("%s missing — all volumes should unpack into %s: %v", member, extractDir, err)
+					}
+					if info.Size() != size {
+						t.Fatalf("%s size %d want %d", member, info.Size(), size)
+					}
+				}
+
+				stderr := errBuf.String()
+				for _, want := range []string{
+					"extracting 1 archive",
+					"all members unpack into " + extractDir,
+					"reading volume 1/6: multi.part01.rar",
+					"reading volume 6/6: multi.part06.rar",
+					"(6 file(s) from 6 volumes)",
+				} {
+					if !strings.Contains(stderr, want) {
+						t.Fatalf("stderr missing %q:\n%s", want, stderr)
+					}
+				}
+				hasBar := strings.Contains(stderr, "extract [")
+				if progress && (!hasBar || !strings.Contains(stderr, "6/6")) {
+					t.Fatalf("default run should draw a bar reaching 6/6:\n%s", stderr)
+				}
+				if !progress && hasBar {
+					t.Fatalf("--progress=false should not draw a bar:\n%s", stderr)
+				}
+			})
+		}
+	}
+}
+
+// bracketVolumes copies the 6-part fixture into a temp dir with a name that
+// contains glob characters, like real downloads ("29090D43[ddpanda].partN.rar").
+func bracketVolumes(t *testing.T) (dir string, part func(int) string) {
+	t.Helper()
+	dir = t.TempDir()
+	part = func(n int) string { return filepath.Join(dir, fmt.Sprintf("29090D43[ddpanda].part%d.rar", n)) }
+	for i := 1; i <= 6; i++ {
+		src := filepath.Join("..", "formats", "rar", "testdata", "multivol", fmt.Sprintf("multi.part%02d.rar", i))
+		data, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(part(i), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir, part
+}
+
+func assertMultiVolumeExtracted(t *testing.T, dest, stderr string) {
+	t.Helper()
+	info, err := os.Stat(filepath.Join(dest, "exe", "test.exe"))
+	if err != nil {
+		t.Fatalf("exe/test.exe missing: %v\n%s", err, stderr)
+	}
+	if info.Size() != 45056 {
+		t.Fatalf("size %d", info.Size())
+	}
+	for _, want := range []string{
+		"multi-volume set (6 volumes",
+		"opening 29090D43[ddpanda].part1.rar",
+		"reading volume 6/6",
+		"(6 file(s) from 6 volumes)",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// The reported failure: choosing a bracket-named first volume in the picker.
+func TestUnarchivePickerBracketMultiVolume(t *testing.T) {
+	_, part := bracketVolumes(t)
+	reg := formats.NewRegistry()
+	reg.Register(rarfmt.New())
+
+	t.Cleanup(cli.SetStdinTTYForTest(true))
+	t.Cleanup(cli.SetArchivePickerForTest(stubPicker{path: part(1)}))
+
+	dest := t.TempDir()
+	root := cli.NewRoot(reg)
+	var errBuf bytes.Buffer
+	root.SetErr(&errBuf)
+	root.SetArgs([]string{"u", "-P=false", "-C", dest})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unarchive via picker: %v\n%s", err, errBuf.String())
+	}
+	assertMultiVolumeExtracted(t, dest, errBuf.String())
+}
+
+// Passing any one part (even a later one) extracts the whole set from part 1.
+func TestUnarchiveSinglePartArgFindsSet(t *testing.T) {
+	_, part := bracketVolumes(t)
+	reg := formats.NewRegistry()
+	reg.Register(rarfmt.New())
+
+	for _, n := range []int{1, 4} {
+		dest := t.TempDir()
+		root := cli.NewRoot(reg)
+		var errBuf bytes.Buffer
+		root.SetErr(&errBuf)
+		root.SetArgs([]string{"u", "-P=false", "-C", dest, part(n)})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("part%d: %v\n%s", n, err, errBuf.String())
+		}
+		assertMultiVolumeExtracted(t, dest, errBuf.String())
+	}
+}
+
+func TestRARArchiveUnsupportedCLI(t *testing.T) {
+	reg := formats.NewRegistry()
+	reg.Register(rarfmt.New())
+
+	src := t.TempDir()
+	file := filepath.Join(src, "a.txt")
+	if err := os.WriteFile(file, []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "out.rar")
+
+	root := cli.NewRoot(reg)
+	root.SetArgs([]string{"a", "-o", out, file})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var ee *cli.ExitError
+	if !errors.As(err, &ee) || ee.Code != cli.ExitUsage {
+		t.Fatalf("want usage exit, got %v", err)
+	}
+	if !strings.Contains(ee.Message, "not supported") {
+		t.Fatalf("message: %q", ee.Message)
+	}
+}
+
 func TestRootHelpPointsToSubcommandHelp(t *testing.T) {
 	reg := formats.NewRegistry()
 	reg.Register(zipfmt.New())
@@ -282,7 +634,11 @@ func TestRootHelpPointsToSubcommandHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	help := buf.String()
-	for _, want := range []string{"zipstar archive --help", "-e/--encrypt", "-p/--password"} {
+	for _, want := range []string{
+		"zipstar archive --help", "-e/--encrypt", "-p/--password",
+		"-f/--format", "-F/--force", "-l/--level", "-P/--progress",
+		"-f, --format", "-F, --force", "-v, --verbose",
+	} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("root help missing %q:\n%s", want, help)
 		}
