@@ -19,9 +19,9 @@ Order locked in SPEC:
 
 1. `--password` (if flag present)
 2. `ZIPSTAR_PASSWORD`
-3. Interactive prompt on a TTY (stderr prompt, no echo)
+3. Interactive prompt on a TTY (stderr prompt; each character masked as `*`)
 
-`--encrypt` is required to create an encrypted archive so passwords are never applied accidentally.
+`-e` / `--encrypt` is required to create an encrypted archive so passwords are never applied accidentally. On a TTY, omitting `--password` / `ZIPSTAR_PASSWORD` opens a masked prompt (`*` per character).
 
 ## Implementation notes
 

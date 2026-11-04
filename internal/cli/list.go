@@ -16,13 +16,18 @@ func newListCmd(opts *Options) *cobra.Command {
 	var password string
 
 	cmd := &cobra.Command{
-		Use:     "list [flags] <archive>",
-		Aliases: []string{"l"},
-		Short:   "List archive contents",
-		Args:    cobra.ExactArgs(1),
+		Use:               "list [flags] [<archive>]",
+		Aliases:           []string{"l"},
+		Short:             "List archive contents",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: archivePathCompletion(opts.Registry),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			archivePath, err := resolveArchiveArg(args, opts.Registry)
+			if err != nil {
+				return err
+			}
 			return runList(cmd.Context(), opts, listArgs{
-				archive:  args[0],
+				archive:  archivePath,
 				password: password,
 				passSet:  cmd.Flags().Changed("password"),
 			})
@@ -77,6 +82,7 @@ func runList(ctx context.Context, opts *Options, a listArgs) error {
 		}
 		fmt.Fprintf(os.Stdout, "%s\t%d\t%v\n", e.Name, e.Size, e.Mode)
 	}
+	printSuccessHint("listed %d entries", len(entries))
 	return nil
 }
 

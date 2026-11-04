@@ -22,19 +22,29 @@ func newUnarchiveCmd(opts *Options) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "unarchive [flags] <archive|glob>...",
+		Use:     "unarchive [flags] [<archive|glob>...]",
 		Aliases: []string{"u"},
 		Short:   "Extract one or more archives (globs supported)",
 		Long: `Extract one or more archives. Arguments may be paths or shell-style globs
-(e.g. '*.rar', 'multi.part*.rar').
+(e.g. '*.rar', 'multi.part*.rar'). With no arguments on a terminal, an
+interactive picker opens to choose an archive.
 
 Multi-volume RAR sets matched by a glob are coalesced: only the first volume is
 opened; sibling volumes are read automatically. All members unpack into the
 single destination directory (-C).`,
-		Args: cobra.MinimumNArgs(1),
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: archivePathCompletion(opts.Registry),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			inputs := args
+			if len(inputs) == 0 {
+				archivePath, err := resolveArchiveArg(args, opts.Registry)
+				if err != nil {
+					return err
+				}
+				inputs = []string{archivePath}
+			}
 			return runUnarchive(cmd.Context(), opts, unarchiveArgs{
-				inputs:   args,
+				inputs:   inputs,
 				dir:      dir,
 				password: password,
 				passSet:  cmd.Flags().Changed("password"),

@@ -4,7 +4,7 @@ User-visible behavior for the `zipstar` CLI. Implementation details live in [ARC
 
 ## Audience
 
-Developer / CI tooling: quiet by default, predictable exit codes, errors that are actionable without `-v`.
+Developer / CI tooling: quiet by default, predictable exit codes, errors that are actionable without `-v`. Interactive gap-filling (path picker, password prompt, success hints) runs only when stdin is a TTY.
 
 ## Platform
 
@@ -39,7 +39,7 @@ Root `zipstar --help` lists global flags only; use `zipstar archive --help` (or 
 ### Unarchive
 
 ```
-zipstar unarchive|u [flags] <archive|glob>...
+zipstar unarchive|u [flags] [<archive|glob>...]
 ```
 
 | Flag | Default | Meaning |
@@ -53,10 +53,14 @@ zipstar unarchive|u [flags] <archive|glob>...
 
 Arguments may be concrete paths or shell-style globs (`*.rar`, `multi.part*.rar`). Status lines (glob matches, multi-volume coalescing, per-archive labels, completion) go to **stderr**. Multi-volume RAR sets matched by a glob are extracted once from the first volume; sibling parts are opened automatically beside it.
 
+At least one argument is required when stdin is not a TTY. When no arguments are given and stdin is a TTY, zipstar opens an interactive path picker (see Interactive path picker) to choose a single archive. Canceling the picker (Esc) exits with code `1`.
+
+After each archive, zipstar prints a summary line to stderr, e.g. `finished multi.part01.rar → <dir> (6 file(s) from 6 volumes)`, followed by `done: extracted N archive(s) into <dir>`. These lines print on TTY and non-TTY runs alike.
+
 ### List
 
 ```
-zipstar list|l [flags] <archive>
+zipstar list|l [flags] [<archive>]
 ```
 
 | Flag | Default | Meaning |
@@ -70,14 +74,36 @@ Every flag has a one-letter shortcut. Case matters: `-f` format / `-F` force, `-
 Default list line: `name<TAB>size<TAB>mode`  
 Verbose list line: `name<TAB>size<TAB>mode<TAB>method<TAB>plain|encrypted`
 
+`<archive>` follows the same optional/TTY picker rules as unarchive.
+
+After a successful list on a TTY, zipstar prints one hint line to stderr, e.g. `listed N entries`.
+
+## Interactive path picker
+
+Used by `unarchive` and `list` when the archive argument is omitted and stdin is a TTY:
+
+- Starts in the current working directory.
+- Lists the **current directory only** (Enter on a directory drills in; `..` goes up). Live filtering does not recurse.
+- Typeahead/filter box filters the current listing; an absolute or relative path may be typed/pasted to jump.
+- Files whose extension matches a registered format (today `.zip` and `.rar`) are highlighted as selectable archives.
+- Esc / Ctrl-C cancels → exit `1`.
+
+**Future (not this wave):** shallow recursive listing up to depth 2 under the current directory.
+
 ## Format selection
 
 1. If `--format` is set, that format must be registered.
 2. If the archive path has an extension belonging to a **different** registered format, **error** (mismatch).
-3. If `--format` is unset, the path extension must identify a registered format.
-4. If `--format` is unset and there is no usable extension, **error** (ambiguous).
+3. If `--format` is unset and the path extension identifies a registered format, use that format.
+4. If `--format` is unset and there is no usable extension (missing or unknown), **sniff** the file contents once (see Content sniff). On a hit, use the sniffed format. On a miss, **error** (ambiguous / unknown) as before.
 
-When `-o` is omitted on `archive`, zipstar derives an output name using `--format` if set, otherwise `zip`, then applies the rules above to the derived path.
+When `-o` is omitted on `archive`, zipstar derives an output name using `--format` if set, otherwise `zip`, then applies the rules above to the derived path. Sniff applies to existing archive paths (`unarchive` / `list`), not to deriving `-o`.
+
+## Content sniff
+
+- One-shot magic-byte detection on the final selected/passed path (zip local-file / EOCD signatures today).
+- Results cached under `$XDG_CACHE_HOME/zipstar/sniff.json` (fallback `~/.cache/zipstar/sniff.json`), keyed by absolute path + size + mtime. Stale or corrupt cache entries are ignored.
+- Shell completion does **not** sniff (extension filter only).
 
 ## Paths inside the archive
 
@@ -95,22 +121,37 @@ Refuse to overwrite an existing archive or extracted path unless `--force` is se
 
 - Creating an encrypted archive requires `--encrypt`.
 - Providing `--password` without `--encrypt` on `archive` is an error.
-- Password resolution order: `--password` → env `ZIPSTAR_PASSWORD` → interactive prompt (no echo) when a TTY is available.
+- Password resolution order: `-p`/`--password` → env `ZIPSTAR_PASSWORD` → interactive prompt when a TTY is available (each character masked as `*`; backspace supported).
 - Wrong or missing password → exit `2` with a clear message (no need for `-v`).
+
+## Shell completion
+
+Cobra’s `completion` subcommand is available:
+
+```
+zipstar completion zsh|bash|fish
+```
+
+`unarchive` and `list` complete directories and files matching registered archive extensions. Install example (zsh):
+
+```
+zipstar completion zsh > "${fpath[1]}/_zipstar"
+```
 
 ## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | `0` | Success |
-| `1` | Usage / validation errors |
+| `1` | Usage / validation errors (including picker cancel) |
 | `2` | Runtime errors (I/O, archive, password) |
 
 ## Verbosity and errors
 
-- `unarchive` prints short status messages to stderr (what will be extracted / multi-volume notes / done).
+- `unarchive` prints short status messages to stderr (what will be extracted / multi-volume notes / per-archive summary / done).
 - `unarchive` draws a progress bar on stderr by default; pass `-P=false` / `--progress=false` for log-friendly output (CI, piping), which keeps the plain status lines.
 - `-v`: print per-entry names on stdout (and extra list columns for `list`).
+- `list` prints a TTY-only success hint (`listed N entries`), independent of `-v`.
 - Errors go to stderr with enough context to act.
 
 ## Format capabilities
@@ -126,4 +167,4 @@ RAR extract prefers a bundled/system **UnRAR** binary (per-platform release asse
 
 ## Out of scope (v1)
 
-Exclude xattrs / resource forks / Finder flags, `--json` list output, ZipCrypto, creating RAR archives, brace-style shell expansion, and formats other than zip/rar (e.g. `tar*`).
+Exclude xattrs / resource forks / Finder flags, `--json` list output, ZipCrypto, creating RAR archives, brace-style shell expansion, formats other than zip/rar (e.g. `tar*`), `--no-input` / `CI=1` kill switch, recursive live picker scans, `archive` interactive multi-select, extract confirmation prompts beyond `--force`.
