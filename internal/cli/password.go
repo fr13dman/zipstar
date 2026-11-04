@@ -2,8 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -56,10 +57,76 @@ func promptPassword(prompt string) (string, error) {
 		return "", fmt.Errorf("stdin is not a terminal (set --password or %s for non-interactive use)", passwordEnv)
 	}
 	fmt.Fprint(os.Stderr, prompt)
-	raw, err := term.ReadPassword(fd)
-	fmt.Fprintln(os.Stderr)
+
+	state, err := term.MakeRaw(fd)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimRight(string(raw), "\r\n"), nil
+	defer func() { _ = term.Restore(fd, state) }()
+
+	pw, err := readPasswordMasked(os.Stdin, os.Stderr)
+	// Raw mode: emit CRLF so the next line of output starts cleanly.
+	fmt.Fprint(os.Stderr, "\r\n")
+	if err != nil {
+		return "", err
+	}
+	return pw, nil
+}
+
+// readPasswordMasked reads a password from in, writing one '*' per rune to out.
+// Supports UTF-8, backspace/delete, Enter to finish, and Ctrl-C to cancel.
+func readPasswordMasked(in io.Reader, out io.Writer) (string, error) {
+	var pw []rune
+	var partial []byte
+	buf := make([]byte, 1)
+
+	for {
+		_, err := in.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+
+		b := buf[0]
+		switch b {
+		case '\r', '\n':
+			return string(pw), nil
+		case 0x03: // Ctrl-C
+			return "", fmt.Errorf("interrupted")
+		case 0x04: // Ctrl-D
+			return string(pw), nil
+		case 127, 8: // DEL / Backspace
+			partial = nil
+			if len(pw) == 0 {
+				continue
+			}
+			pw = pw[:len(pw)-1]
+			if _, err := io.WriteString(out, "\b \b"); err != nil {
+				return "", err
+			}
+			continue
+		}
+
+		if b < 32 {
+			// Ignore other control characters.
+			continue
+		}
+
+		partial = append(partial, b)
+		if !utf8.FullRune(partial) {
+			continue
+		}
+		r, size := utf8.DecodeRune(partial)
+		partial = partial[size:]
+		if r == utf8.RuneError {
+			continue
+		}
+		pw = append(pw, r)
+		if _, err := io.WriteString(out, "*"); err != nil {
+			return "", err
+		}
+	}
+	return string(pw), nil
 }

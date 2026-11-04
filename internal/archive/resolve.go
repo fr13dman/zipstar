@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/fr13dman/zipstar-cli/internal/detect"
 	"github.com/fr13dman/zipstar-cli/internal/formats"
 )
 
@@ -13,8 +14,8 @@ import (
 // Rules (locked in SPEC):
 //   - If --format is set, that format must exist.
 //   - If the path has an extension that belongs to a different format, error (mismatch).
-//   - If --format is unset, the extension must identify a known format.
-//   - If --format is unset and there is no usable extension, error (ambiguous).
+//   - If --format is unset, the extension must identify a known format OR content sniff must succeed.
+//   - If --format is unset and there is no usable extension and sniff fails, error (ambiguous).
 func ResolveFormat(reg *formats.Registry, formatFlag, path string) (formats.Format, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
@@ -40,14 +41,26 @@ func ResolveFormat(reg *formats.Registry, formatFlag, path string) (formats.Form
 		return f, nil
 	}
 
+	if ext != "" {
+		if f, ok := reg.ByExtension(ext); ok {
+			return f, nil
+		}
+	}
+
+	// Missing or unknown extension: one-shot content sniff (with cache) when the path exists.
+	// Non-existent paths (e.g. archive -o targets) skip sniff and keep the extension errors below.
+	if name, ok, err := detect.SniffFormatCached(path); err == nil && ok {
+		f, found := reg.Get(name)
+		if !found {
+			return nil, fmt.Errorf("sniffed format %q is not registered", name)
+		}
+		return f, nil
+	}
+
 	if ext == "" {
 		return nil, fmt.Errorf("cannot infer archive format from %q: add a known extension (e.g. .zip) or pass --format", path)
 	}
-	f, ok := reg.ByExtension(ext)
-	if !ok {
-		return nil, fmt.Errorf("unknown archive extension %q on %q: pass --format or use a supported extension", ext, path)
-	}
-	return f, nil
+	return nil, fmt.Errorf("unknown archive extension %q on %q: pass --format or use a supported extension", ext, path)
 }
 
 func sameFormat(a, b formats.Format) bool {
