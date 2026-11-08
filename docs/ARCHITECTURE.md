@@ -122,6 +122,7 @@ See [implementation/interactive-path-picker.md](implementation/interactive-path-
 
 - TTY-only; missing `<archive>` on `unarchive` / `list`
 - Browser + typeahead; cwd listing only (drill into dirs; future: depth ≤ 2)
+- Sorted newest first by default; Ctrl+S switches date/name, Ctrl+R reverses ([picker-sort.md](implementation/picker-sort.md))
 - Esc cancels → exit `1`
 - Injectable via `ArchivePicker` for tests
 

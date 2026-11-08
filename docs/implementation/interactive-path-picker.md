@@ -64,6 +64,7 @@ unarchive/list (no <archive>)
 - Missing typed folder shows `no such directory: …` live; backspacing restores the listing
 - Archives (registered extensions) highlighted and selectable
 - Multi-volume RAR sets grouped via `archive.VolumeOf`: only the first volume is listed, labelled `(N parts)`; later volumes are hidden so a mid-set part cannot be picked. The CLI's `DiscoverVolumes` then extracts the full set from that path.
+- Sorted by modification date, newest first, by default. Ctrl+S switches between date and name sorting, and Ctrl+R reverses the order; `..` stays on top and the header shows the current sort. See [picker-sort.md](picker-sort.md).
 - Esc / Ctrl-C → `ErrCanceled` → exit code 1
 
 ### Sniff + cache
@@ -92,7 +93,7 @@ zipstar completion zsh > "${fpath[1]}/_zipstar"
 
 ## Tests
 
-- `internal/cli/picker` — filter, drill, select, cancel, path jump, reject non-archive; live path browsing driven by real key messages (per-keystroke typing, paste, `~/`, `..`, Tab completion, Enter on partial path, missing-folder error + recovery)
+- `internal/cli/picker` — filter, drill, select, cancel, path jump, reject non-archive; live path browsing driven by real key messages (per-keystroke typing, paste, `~/`, `..`, Tab completion, Enter on partial path, missing-folder error + recovery); sort by date/name (default newest first, Ctrl+S / Ctrl+R, `..` pinned, cursor kept, persists across filter and drill, multi-volume set sorts by first volume)
 - `internal/detect` — zip positive/negative, cache hit/stale
 - `internal/archive` — sniff no-extension resolve; `--format` mismatch still errors
 - `internal/cli` — missing arg non-TTY usage; picker stub + fake TTY extract; completion fixture

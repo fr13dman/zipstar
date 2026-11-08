@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -386,5 +387,153 @@ func TestPathJump(t *testing.T) {
 	want, _ := filepath.Abs(zipPath)
 	if out.selected != want {
 		t.Fatalf("selected %q want %q", out.selected, want)
+	}
+}
+
+// writeAged creates each path (directories end in "/") and sets its mtime to
+// base plus the given offset. Times are applied after all paths exist, since
+// creating a child bumps its parent directory's mtime.
+func writeAged(t *testing.T, root string, ages map[string]time.Duration) {
+	t.Helper()
+	for name := range ages {
+		p := filepath.Join(root, name)
+		var err error
+		if strings.HasSuffix(name, "/") {
+			err = os.MkdirAll(p, 0o755)
+		} else {
+			if err = os.MkdirAll(filepath.Dir(p), 0o755); err == nil {
+				err = os.WriteFile(p, []byte("PK\x03\x04"), 0o644)
+			}
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Now().Add(-48 * time.Hour)
+	for name, off := range ages {
+		ts := base.Add(off)
+		if err := os.Chtimes(filepath.Join(root, name), ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// sortTree: case-insensitive name order is alpha, Bravo, charlie, Delta (byte
+// order would differ); date order newest first is Bravo, Delta, charlie, alpha.
+func sortTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeAged(t, root, map[string]time.Duration{
+		"alpha.zip":     1 * time.Hour,
+		"Bravo.zip":     4 * time.Hour,
+		"charlie/x.zip": 1 * time.Hour,
+		"charlie/y.zip": 2 * time.Hour,
+		"charlie/":      2 * time.Hour,
+		"Delta.txt":     3 * time.Hour,
+	})
+	return root
+}
+
+func assertOrder(t *testing.T, label string, es []dirEntry, want ...string) {
+	t.Helper()
+	got := names(es)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("%s: order %v want %v", label, got, want)
+	}
+}
+
+func TestDefaultSortNewestFirst(t *testing.T) {
+	m := newModel(sortTree(t), []string{".zip"})
+	assertOrder(t, "default", m.filtered, "..", "Bravo.zip", "Delta.txt", "charlie", "alpha.zip")
+}
+
+func TestCtrlSTogglesNameSort(t *testing.T) {
+	m := newModel(sortTree(t), []string{".zip"})
+	m, _ = press(m, tea.KeyCtrlS)
+	assertOrder(t, "name", m.filtered, "..", "alpha.zip", "Bravo.zip", "charlie", "Delta.txt")
+	if m.filter.Value() != "" {
+		t.Fatalf("ctrl+s must not type into the filter, got %q", m.filter.Value())
+	}
+	m, _ = press(m, tea.KeyCtrlS)
+	assertOrder(t, "back to date", m.filtered, "..", "Bravo.zip", "Delta.txt", "charlie", "alpha.zip")
+}
+
+func TestCtrlRReverses(t *testing.T) {
+	m := newModel(sortTree(t), []string{".zip"})
+	m, _ = press(m, tea.KeyCtrlR)
+	assertOrder(t, "date oldest", m.filtered, "..", "alpha.zip", "charlie", "Delta.txt", "Bravo.zip")
+	m, _ = press(m, tea.KeyCtrlS)
+	assertOrder(t, "name A-Z", m.filtered, "..", "alpha.zip", "Bravo.zip", "charlie", "Delta.txt")
+	m, _ = press(m, tea.KeyCtrlR)
+	assertOrder(t, "name Z-A", m.filtered, "..", "Delta.txt", "charlie", "Bravo.zip", "alpha.zip")
+}
+
+func TestSortKeepsHighlightedEntry(t *testing.T) {
+	m := newModel(sortTree(t), []string{".zip"})
+	for i, e := range m.filtered {
+		if e.Name == "alpha.zip" {
+			m.cursor = i
+		}
+	}
+	for _, k := range []tea.KeyType{tea.KeyCtrlS, tea.KeyCtrlR, tea.KeyCtrlS} {
+		m, _ = press(m, k)
+		if got := m.filtered[m.cursor].Name; got != "alpha.zip" {
+			t.Fatalf("after %v cursor on %q, want alpha.zip (order %v)", k, got, names(m.filtered))
+		}
+	}
+}
+
+func TestSortPersistsAcrossFilterAndDrill(t *testing.T) {
+	root := sortTree(t)
+	m := newModel(root, []string{".zip"})
+	m = typeKeys(m, "zip")
+	assertOrder(t, "filtered by date", m.filtered, "Bravo.zip", "alpha.zip")
+	m, _ = press(m, tea.KeyCtrlS)
+	assertOrder(t, "filtered by name", m.filtered, "alpha.zip", "Bravo.zip")
+
+	for range "zip" {
+		m, _ = press(m, tea.KeyBackspace)
+	}
+	m = typeKeys(m, "charlie/")
+	m, _ = press(m, tea.KeyEnter)
+	if m.dir != filepath.Join(root, "charlie") {
+		t.Fatalf("dir %q", m.dir)
+	}
+	// Name A-Z carries over (date newest first would put y.zip first).
+	assertOrder(t, "drilled", m.filtered, "..", "x.zip", "y.zip")
+}
+
+func TestMultiPartSetSortsByFirstVolume(t *testing.T) {
+	root := t.TempDir()
+	writeAged(t, root, map[string]time.Duration{
+		"set.part1.rar": 1 * time.Hour,
+		"set.part2.rar": 3 * time.Hour,
+		"mid.zip":       2 * time.Hour,
+	})
+	m := newModel(root, []string{".zip", ".rar"})
+	assertOrder(t, "date", m.filtered, "..", "mid.zip", "set.part1.rar")
+}
+
+func TestViewShowsSortIndicator(t *testing.T) {
+	m := newModel(sortTree(t), []string{".zip"})
+	cases := []struct {
+		key  tea.KeyType
+		want string
+	}{
+		{0, "sort: date (newest first)"},
+		{tea.KeyCtrlR, "sort: date (oldest first)"},
+		{tea.KeyCtrlS, "sort: name (A-Z)"},
+		{tea.KeyCtrlR, "sort: name (Z-A)"},
+	}
+	for _, c := range cases {
+		if c.key != 0 {
+			m, _ = press(m, c.key)
+		}
+		if v := m.View(); !strings.Contains(v, c.want) {
+			t.Fatalf("view missing %q:\n%s", c.want, v)
+		}
+	}
+	if v := m.View(); !strings.Contains(v, "ctrl+s sort name/date") || !strings.Contains(v, "ctrl+r reverse") {
+		t.Fatalf("help line missing sort keys:\n%s", m.View())
 	}
 }

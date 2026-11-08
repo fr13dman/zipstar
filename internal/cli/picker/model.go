@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,7 +23,15 @@ type dirEntry struct {
 	IsDir     bool
 	IsArchive bool
 	Parts     int // > 1 for the first volume of a multi-volume set (other volumes are hidden)
+	ModTime   time.Time
 }
+
+type sortField int
+
+const (
+	sortByDate sortField = iota
+	sortByName
+)
 
 // model is the Bubble Tea path picker state.
 //
@@ -41,6 +51,8 @@ type model struct {
 	canceled  bool
 	statusErr string
 	quitting  bool
+	sortBy    sortField
+	sortDesc  bool // date: newest first; name: Z-A
 }
 
 func newModel(startDir string, extensions []string) model {
@@ -55,10 +67,12 @@ func newModel(startDir string, extensions []string) model {
 	ti.Width = 48
 
 	m := model{
-		dir:     startDir,
-		viewDir: startDir,
-		exts:    exts,
-		filter:  ti,
+		dir:      startDir,
+		viewDir:  startDir,
+		exts:     exts,
+		filter:   ti,
+		sortBy:   sortByDate,
+		sortDesc: true,
 	}
 	m.reload()
 	return m
@@ -104,10 +118,77 @@ func (m *model) reload() {
 				}
 			}
 		}
-		out = append(out, dirEntry{Name: name, IsDir: isDir, IsArchive: isArch, Parts: parts})
+		var mod time.Time
+		if info, err := e.Info(); err == nil {
+			mod = info.ModTime()
+		}
+		out = append(out, dirEntry{Name: name, IsDir: isDir, IsArchive: isArch, Parts: parts, ModTime: mod})
 	}
 	m.entries = out
+	m.sortEntries()
+}
+
+// sortEntries orders entries by the current sort, keeping ".." on top, and
+// refreshes the filtered view.
+func (m *model) sortEntries() {
+	rest := m.entries
+	if len(rest) > 0 && rest[0].Name == ".." {
+		rest = rest[1:]
+	}
+	sort.SliceStable(rest, func(i, j int) bool {
+		return m.entryLess(rest[i], rest[j])
+	})
 	m.applyFilter()
+}
+
+func (m *model) entryLess(a, b dirEntry) bool {
+	if m.sortBy == sortByDate && !a.ModTime.Equal(b.ModTime) {
+		if m.sortDesc {
+			return a.ModTime.After(b.ModTime)
+		}
+		return a.ModTime.Before(b.ModTime)
+	}
+	if m.sortBy == sortByName && m.sortDesc {
+		return nameLess(b.Name, a.Name)
+	}
+	return nameLess(a.Name, b.Name)
+}
+
+func nameLess(a, b string) bool {
+	la, lb := strings.ToLower(a), strings.ToLower(b)
+	if la != lb {
+		return la < lb
+	}
+	return a < b
+}
+
+// setSort re-sorts the listing and keeps the highlighted entry highlighted.
+func (m *model) setSort(field sortField, desc bool) {
+	cur := ""
+	if m.cursor >= 0 && m.cursor < len(m.filtered) {
+		cur = m.filtered[m.cursor].Name
+	}
+	m.sortBy, m.sortDesc = field, desc
+	m.sortEntries()
+	for i, e := range m.filtered {
+		if e.Name == cur {
+			m.cursor = i
+			return
+		}
+	}
+}
+
+func (m model) sortLabel() string {
+	switch {
+	case m.sortBy == sortByName && m.sortDesc:
+		return "sort: name (Z-A)"
+	case m.sortBy == sortByName:
+		return "sort: name (A-Z)"
+	case m.sortDesc:
+		return "sort: date (newest first)"
+	default:
+		return "sort: date (oldest first)"
+	}
 }
 
 type volumeSet struct {
@@ -266,6 +347,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyTab:
 			m.complete()
 			return m, nil
+		case tea.KeyCtrlS:
+			if m.sortBy == sortByDate {
+				m.setSort(sortByName, false)
+			} else {
+				m.setSort(sortByDate, true)
+			}
+			return m, nil
+		case tea.KeyCtrlR:
+			m.setSort(m.sortBy, !m.sortDesc)
+			return m, nil
 		}
 	}
 
@@ -366,6 +457,8 @@ func (m model) View() string {
 	b.WriteString(titleStyle.Render("Select archive"))
 	b.WriteString("\n")
 	b.WriteString(m.viewDir)
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render(m.sortLabel()))
 	b.WriteString("\n\n")
 	b.WriteString(m.filter.View())
 	b.WriteString("\n\n")
@@ -408,7 +501,7 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("type to filter or a path (/, ~/, ../) to browse · tab complete · ↑↓ move · enter open/select · esc cancel"))
+	b.WriteString(helpStyle.Render("type to filter or a path (/, ~/, ../) to browse · tab complete · ↑↓ move · enter open/select · ctrl+s sort name/date · ctrl+r reverse · esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }
