@@ -105,6 +105,7 @@ Used by `unarchive` and `list` when the archive argument is omitted and stdin is
 - **Tab** completes the highlighted entry into the input (folders get a trailing `/`, so their contents preview). **Enter** opens a typed folder (it becomes the current folder) or selects a typed file; on a partial path it opens/selects the highlighted match. A typed folder that does not exist shows `no such directory` until corrected.
 - Files whose extension matches a registered format (today `.zip` and `.rar`) are highlighted as selectable archives.
 - A multi-volume RAR set is listed **once**, as its first volume with a part count (e.g. `name.part1.rar (2 parts)`); later volumes (`.part2.rar`…, `.r00`…) are hidden. Selecting it extracts the whole set.
+- The listing is sorted by modification date, **newest first**, by default. **Ctrl+S** switches between date and name sorting (name starts A-Z, case-insensitive; date starts newest first), and **Ctrl+R** reverses the order. `..` always stays on top, folders and files are sorted together, and a multi-volume set sorts by its first volume's date. The current sort is shown under the folder path (e.g. `sort: date (newest first)`) and carries over between folders for the rest of the picker session.
 - Esc / Ctrl-C cancels → exit `1`.
 
 **Future (not this wave):** shallow recursive listing up to depth 2 under the current directory.
